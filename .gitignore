@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+.eggs/
+
+# pytest
+.pytest_cache/
+
+# Amiga binaries (cross-compiled output)
+examples/hello
+examples/amipython.h
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
