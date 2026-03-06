@@ -30,14 +30,25 @@ def _compile_and_run(source: str) -> str:
         c_file = tmppath / "test.c"
         c_file.write_text(c_code)
 
-        # Copy header
+        # Copy headers
         shutil.copy2(HEADER_DIR / "amipython.h", tmppath / "amipython.h")
+
+        # Build source file list
+        source_files = [str(c_file)]
+
+        # If engine is used, copy engine headers and host stubs
+        if '#include "amipython_engine.h"' in c_code:
+            shutil.copy2(HEADER_DIR / "amipython_engine.h",
+                         tmppath / "amipython_engine.h")
+            shutil.copy2(HEADER_DIR / "amipython_engine_host.c",
+                         tmppath / "amipython_engine_host.c")
+            source_files.append(str(tmppath / "amipython_engine_host.c"))
 
         # Compile
         binary = tmppath / "test"
         result = subprocess.run(
             ["gcc", "-std=c89", "-pedantic", "-Wall", "-Werror",
-             "-o", str(binary), str(c_file), "-lm"],
+             "-o", str(binary), *source_files, "-lm"],
             capture_output=True, text=True,
         )
         assert result.returncode == 0, (
@@ -155,3 +166,71 @@ print(increment())
 ''')
         lines = output.strip().split("\n")
         assert [l.strip() for l in lines] == ["1", "2", "3"]
+
+
+class TestEngine:
+    def test_display_init(self):
+        output = _compile_and_run('''
+from amiga import Display
+d = Display(320, 256, bitplanes=8)
+''')
+        assert "[display] init 320x256 8bp" in output
+
+    def test_bitmap_methods(self):
+        output = _compile_and_run('''
+from amiga import Bitmap
+bm = Bitmap(320, 256)
+bm.plot(10, 20, 3)
+bm.clear()
+''')
+        assert "[bitmap] init 320x256 5bp" in output
+        assert "[bitmap] plot 10,20 color=3" in output
+        assert "[bitmap] clear 320x256" in output
+
+    def test_palette_module(self):
+        output = _compile_and_run('''
+from amiga import palette
+palette.aga(0, 255, 128, 64)
+''')
+        assert "[palette] aga 0 r=255 g=128 b=64" in output
+
+    def test_wait_mouse(self):
+        output = _compile_and_run('''
+from amiga import wait_mouse
+wait_mouse()
+''')
+        assert "[input] wait_mouse" in output
+
+    def test_display_show_bitmap(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap
+d = Display(320, 256)
+bm = Bitmap(320, 256)
+d.show(bm)
+''')
+        assert "[display] show 320x256 on 320x256" in output
+
+    def test_display1_example(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, palette, wait_mouse
+
+display = Display(320, 256, bitplanes=8)
+bm = Bitmap(320, 256, bitplanes=8)
+
+for i in range(256):
+    palette.aga(i, i, i, i)
+
+for i in range(255, 0, -1):
+    bm.circle_filled(160, 128, i // 2, i)
+
+display.show(bm)
+wait_mouse()
+''')
+        assert "[display] init 320x256 8bp" in output
+        assert "[bitmap] init 320x256 8bp" in output
+        assert "[palette] aga 0 r=0 g=0 b=0" in output
+        assert "[palette] aga 255 r=255 g=255 b=255" in output
+        assert "[bitmap] circle_filled 160,128 r=127 color=255" in output
+        assert "[bitmap] circle_filled 160,128 r=0 color=1" in output
+        assert "[display] show 320x256 on 320x256" in output
+        assert "[input] wait_mouse" in output

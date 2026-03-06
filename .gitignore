@@ -11,13 +11,19 @@ build/
 # pytest
 .pytest_cache/
 
-# Amiga binaries (cross-compiled output)
+# Build artifacts in examples (only .py files are source)
+examples/**/*.c
+examples/**/*.h
 examples/hello
-examples/amipython.h
+examples/basic/display1
 
 # IDE
 .vscode/
 .idea/
+
+# Temporary/debug
+session
+*.log
 
 # OS
 .DS_Store

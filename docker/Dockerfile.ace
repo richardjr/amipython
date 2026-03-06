@@ -1,0 +1,22 @@
+FROM amigadev/crosstools:m68k-amigaos
+
+# Clone ACE and its CMake toolchain
+RUN git clone --depth 1 https://github.com/AmigaPorts/ACE.git /opt/ace && \
+    git clone --depth 1 https://github.com/AmigaPorts/AmigaCMakeCrossToolchains.git /opt/cmake-toolchains
+
+# Patch ACE for CLI launch fix and debug tracing
+COPY patch_ace.py /tmp/patch_ace.py
+RUN python3 /tmp/patch_ace.py /opt/ace/src/ace/managers/system.c
+
+# Pre-build ACE as a static library
+RUN mkdir -p /opt/ace/build && cd /opt/ace/build && \
+    cmake .. \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/cmake-toolchains/m68k-amigaos.cmake \
+        -DM68K_CPU=68000 \
+        -DM68K_FPU=soft \
+        -DACE_LIBRARY_KIND=STATIC \
+        -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc)
+
+ENV ACE_DIR=/opt/ace
+ENV CMAKE_TOOLCHAINS_DIR=/opt/cmake-toolchains

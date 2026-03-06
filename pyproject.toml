@@ -22,8 +22,11 @@ amipython = "amipython.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+amipython = ["c_runtime/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "docker: requires Docker with vbcc image",
+    "docker: requires Docker with vbcc or ACE image",
 ]

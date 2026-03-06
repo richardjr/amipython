@@ -2,12 +2,14 @@
 
 import ast
 
+from amipython.engine import ALL_ENGINE_NAMES, OBJECT_TYPES
 from amipython.errors import ValidationError
 
 # AST node types allowed in Phase 1
 ALLOWED_NODES = frozenset({
     # Module structure
     ast.Module,
+    ast.ImportFrom,
     # Statements
     ast.FunctionDef,
     ast.Return,
@@ -60,6 +62,9 @@ ALLOWED_NODES = frozenset({
     # Function arguments
     ast.arguments,
     ast.arg,
+    # Import / keyword support
+    ast.keyword,
+    ast.alias,
 })
 
 # Built-in functions allowed in Phase 1
@@ -122,10 +127,25 @@ class Validator(ast.NodeVisitor):
             self._reject(node, "while/else is not supported")
         self.generic_visit(node)
 
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        if node.module != "amiga":
+            self._reject(node, "only 'from amiga import ...' is supported")
+            return
+        for alias in node.names:
+            if alias.name not in ALL_ENGINE_NAMES:
+                self._reject(node, f"unknown engine import: '{alias.name}'")
+            if alias.asname is not None:
+                self._reject(node, "import aliases are not supported")
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call):
-        # Reject keyword arguments in calls (except for built-in usage later)
+        # Allow keyword arguments for engine constructor calls
         if node.keywords:
-            self._reject(node, "keyword arguments are not supported")
+            is_engine_constructor = (
+                isinstance(node.func, ast.Name) and node.func.id in OBJECT_TYPES
+            )
+            if not is_engine_constructor:
+                self._reject(node, "keyword arguments are not supported")
         if node.starargs if hasattr(node, "starargs") else False:
             self._reject(node, "star arguments are not supported")
         self.generic_visit(node)

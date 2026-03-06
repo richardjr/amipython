@@ -31,8 +31,8 @@ def transpile(source: Path, output: Path | None):
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    # Copy amipython.h alongside the output
-    _copy_header(output.parent)
+    # Copy runtime files alongside the output
+    _copy_runtime(output.parent, c_code)
 
     output.write_text(c_code)
     click.echo(f"Wrote {output}")
@@ -61,11 +61,74 @@ def build(source: Path, output: Path | None):
     c_file.write_text(c_code)
 
     header_dir = _header_dir()
-    _copy_header(c_file.parent)
+    _copy_runtime(c_file.parent, c_code)
 
     try:
         result = cross_compile(c_file, output, header_dir)
         click.echo(f"Built {result}")
+    except AmipythonError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command("build-ace-image")
+def build_ace_image():
+    """Build the Docker image with GCC + ACE engine (required for engine builds)."""
+    from amipython.docker import build_ace_image as do_build, has_ace_image
+
+    if has_ace_image():
+        click.echo("ACE Docker image already exists. Rebuilding...")
+
+    click.echo("Building ACE Docker image (this may take a few minutes)...")
+    try:
+        do_build()
+        click.echo("ACE Docker image built successfully.")
+    except AmipythonError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Output binary path (default: source stem without extension)")
+@click.option("--no-build", is_flag=True, help="Skip build, run existing binary")
+def run(source: Path, output: Path | None, no_build: bool):
+    """Build and run in Amiberry."""
+    from amipython.amiberry import launch_amiberry
+
+    if output is None:
+        output = source.with_suffix("")
+
+    if not no_build:
+        from amipython.docker import cross_compile
+        from amipython.pipeline import transpile as do_transpile
+
+        try:
+            code = source.read_text()
+            c_code = do_transpile(code, filename=str(source))
+        except AmipythonError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+        c_file = source.with_suffix(".c")
+        c_file.write_text(c_code)
+
+        header_dir = _header_dir()
+        _copy_runtime(c_file.parent, c_code)
+
+        try:
+            output = cross_compile(c_file, output, header_dir)
+            click.echo(f"Built {output}")
+        except AmipythonError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+    elif not output.exists():
+        click.echo(f"Error: binary not found: {output}", err=True)
+        sys.exit(1)
+
+    try:
+        launch_amiberry(output)
     except AmipythonError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
@@ -76,10 +139,18 @@ def _header_dir() -> Path:
     return Path(__file__).parent / "c_runtime"
 
 
-def _copy_header(dest_dir: Path):
-    """Copy amipython.h to dest_dir if not already there."""
+def _copy_runtime(dest_dir: Path, c_code: str):
+    """Copy runtime headers (and host stubs if needed) to dest_dir."""
     import shutil
-    src = _header_dir() / "amipython.h"
-    dst = dest_dir / "amipython.h"
-    if src.resolve() != dst.resolve():
-        shutil.copy2(src, dst)
+    runtime_dir = _header_dir()
+    for name in ["amipython.h"]:
+        src = runtime_dir / name
+        dst = dest_dir / name
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
+    if '#include "amipython_engine.h"' in c_code:
+        for name in ["amipython_engine.h", "amipython_engine_host.c"]:
+            src = runtime_dir / name
+            dst = dest_dir / name
+            if src.exists() and src.resolve() != dst.resolve():
+                shutil.copy2(src, dst)

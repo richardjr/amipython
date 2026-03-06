@@ -2,9 +2,11 @@
 
 import ast
 
+from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import EmitError
 from amipython.types import (
     C_TYPE_MAP,
+    ENGINE_TYPE_MAP,
     FORMAT_MAP,
     AmipyType,
     TypeInfo,
@@ -87,6 +89,8 @@ class _Emitter:
         if self._uses_float():
             self._line("#define AMIPYTHON_USE_FLOAT")
         self._line('#include "amipython.h"')
+        if self.info.engine_imports:
+            self._line('#include "amipython_engine.h"')
         self._line()
 
         # Collect function declarations (forward declarations)
@@ -122,6 +126,8 @@ class _Emitter:
         """Emit global variable declarations."""
         declared = set()
         for name, var in self.info.globals.items():
+            if var.type == AmipyType.MODULE:
+                continue  # modules aren't C variables
             self._line(f"{self._var_decl(var.type, name)};")
             declared.add(name)
         if declared:
@@ -159,11 +165,16 @@ class _Emitter:
 
     def _emit_main(self, tree: ast.Module):
         """Emit the main function from module-level statements."""
-        # Collect module-level statements (non-function-defs)
-        stmts = [n for n in tree.body if not isinstance(n, ast.FunctionDef)]
+        has_engine = bool(self.info.engine_imports)
+        # Collect module-level statements (non-function-defs, non-imports)
+        stmts = [n for n in tree.body
+                 if not isinstance(n, (ast.FunctionDef, ast.ImportFrom))]
         if not stmts:
             self._line("int main(void) {")
             self.indent += 1
+            if has_engine:
+                self._line("amipython_engine_create();")
+                self._line("amipython_engine_destroy();")
             self._line("return 0;")
             self.indent -= 1
             self._line("}")
@@ -172,9 +183,14 @@ class _Emitter:
         self._line("int main(void) {")
         self.indent += 1
 
+        if has_engine:
+            self._line("amipython_engine_create();")
+
         for stmt in stmts:
             self._emit_stmt(stmt)
 
+        if has_engine:
+            self._line("amipython_engine_destroy();")
         self._line("return 0;")
         self.indent -= 1
         self._line("}")
@@ -204,6 +220,8 @@ class _Emitter:
             pass  # No C output needed
         elif isinstance(node, ast.Global):
             pass  # Handled by type checker
+        elif isinstance(node, ast.ImportFrom):
+            pass  # Handled at module level
         else:
             raise EmitError(
                 f"unsupported statement: {type(node).__name__}",
@@ -213,6 +231,13 @@ class _Emitter:
     def _emit_assign(self, node: ast.Assign):
         target = node.targets[0]
         if isinstance(target, ast.Name):
+            # Engine constructor: display = Display(320, 256, bitplanes=8)
+            if (isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in OBJECT_TYPES
+                    and node.value.func.id in self.info.engine_imports):
+                self._emit_engine_init(target.id, node.value)
+                return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")
 
@@ -244,11 +269,22 @@ class _Emitter:
                 self._line(f"{target} {op}= {val};")
 
     def _emit_expr_stmt(self, node: ast.Expr):
-        if isinstance(node.value, ast.Call) and isinstance(
-            node.value.func, ast.Name
-        ):
-            if node.value.func.id == "print":
-                self._emit_print(node.value)
+        if isinstance(node.value, ast.Call):
+            call = node.value
+            if isinstance(call.func, ast.Name):
+                if call.func.id == "print":
+                    self._emit_print(call)
+                    return
+                # Engine builtin: wait_mouse(), vwait()
+                if (call.func.id in BUILTINS
+                        and call.func.id in self.info.engine_imports):
+                    builtin = BUILTINS[call.func.id]
+                    args = ", ".join(self._emit_expr(a) for a in call.args)
+                    self._line(f"{builtin.c_name}({args});")
+                    return
+            # Method call: bm.circle_filled(...) or palette.aga(...)
+            if isinstance(call.func, ast.Attribute):
+                self._emit_method_call_stmt(call)
                 return
         # General expression statement
         val = self._emit_expr(node.value)
@@ -271,6 +307,64 @@ class _Emitter:
             else:
                 self._line(f"amipython_print_str({val});")
         self._line("amipython_print_newline();")
+
+    def _emit_engine_init(self, var_name: str, call: ast.Call):
+        """Emit engine constructor as init call: amipython_display_init(&d, ...)."""
+        type_name = call.func.id
+        obj_type = OBJECT_TYPES[type_name]
+        ctor = obj_type.constructor
+
+        # Build arg list: positional args + keyword args (fill defaults)
+        args = [self._emit_expr(a) for a in call.args]
+        kw_provided = {kw.arg: self._emit_expr(kw.value) for kw in call.keywords}
+        for kw_name, (kw_type, kw_default) in ctor.keywords.items():
+            if kw_name in kw_provided:
+                args.append(kw_provided[kw_name])
+            else:
+                args.append(str(kw_default))
+
+        all_args = f"&{var_name}, " + ", ".join(args) if args else f"&{var_name}"
+        self._line(f"{obj_type.c_init}({all_args});")
+
+    def _emit_method_call_stmt(self, call: ast.Call):
+        """Emit method/module function call as statement."""
+        attr = call.func
+        if not isinstance(attr.value, ast.Name):
+            raise EmitError("unsupported method call", lineno=call.lineno)
+
+        obj_name = attr.value.id
+        method_name = attr.attr
+        args_strs = [self._emit_arg(a) for a in call.args]
+
+        # Module function: palette.aga(...)
+        if obj_name in self.info.engine_modules:
+            mod = MODULE_TYPES[obj_name]
+            func = mod.functions[method_name]
+            args = ", ".join(args_strs)
+            self._line(f"{func.c_name}({args});")
+            return
+
+        # Object method: bm.circle_filled(...)
+        var = self._get_var_info(obj_name)
+        if var is None:
+            raise EmitError(f"unknown variable '{obj_name}'", lineno=call.lineno)
+
+        obj_type_info = None
+        for ot in OBJECT_TYPES.values():
+            if ENGINE_TYPE_MAP.get(ot.python_name) == var.type:
+                obj_type_info = ot
+                break
+        if obj_type_info is None:
+            raise EmitError(
+                f"'{obj_name}' is not an engine object", lineno=call.lineno
+            )
+
+        method = obj_type_info.methods[method_name]
+        args = ", ".join(args_strs)
+        if args:
+            self._line(f"{method.c_name}(&{obj_name}, {args});")
+        else:
+            self._line(f"{method.c_name}(&{obj_name});")
 
     def _emit_if(self, node: ast.If):
         cond = self._emit_expr(node.test)
@@ -534,12 +628,66 @@ class _Emitter:
                 if arg_type == AmipyType.FLOAT:
                     return f"(({arg}) < 0.0f ? -({arg}) : ({arg}))"
                 return f"(({arg}) < 0 ? -({arg}) : ({arg}))"
+            # Engine builtin as expression
+            if name in BUILTINS and name in self.info.engine_imports:
+                builtin = BUILTINS[name]
+                args = ", ".join(self._emit_expr(a) for a in node.args)
+                return f"{builtin.c_name}({args})"
             # User function call
             args = ", ".join(self._emit_expr(a) for a in node.args)
             return f"{name}({args})"
+        if isinstance(node.func, ast.Attribute):
+            return self._emit_method_call_expr(node)
         raise EmitError("unsupported call expression", lineno=node.lineno)
+
+    def _emit_method_call_expr(self, call: ast.Call) -> str:
+        """Emit method/module function call as expression."""
+        attr = call.func
+        if not isinstance(attr.value, ast.Name):
+            raise EmitError("unsupported method call", lineno=call.lineno)
+
+        obj_name = attr.value.id
+        method_name = attr.attr
+        args_strs = [self._emit_arg(a) for a in call.args]
+
+        if obj_name in self.info.engine_modules:
+            mod = MODULE_TYPES[obj_name]
+            func = mod.functions[method_name]
+            args = ", ".join(args_strs)
+            return f"{func.c_name}({args})"
+
+        var = self._get_var_info(obj_name)
+        if var is None:
+            raise EmitError(f"unknown variable '{obj_name}'", lineno=call.lineno)
+
+        obj_type_info = None
+        for ot in OBJECT_TYPES.values():
+            if ENGINE_TYPE_MAP.get(ot.python_name) == var.type:
+                obj_type_info = ot
+                break
+        if obj_type_info is None:
+            raise EmitError(
+                f"'{obj_name}' is not an engine object", lineno=call.lineno
+            )
+
+        method = obj_type_info.methods[method_name]
+        args = ", ".join(args_strs)
+        if args:
+            return f"{method.c_name}(&{obj_name}, {args})"
+        return f"{method.c_name}(&{obj_name})"
 
     def _get_var_info(self, name: str) -> VariableInfo | None:
         if name in self.info.globals:
             return self.info.globals[name]
         return None
+
+    def _is_engine_object_type(self, t: AmipyType) -> bool:
+        return t in (AmipyType.DISPLAY, AmipyType.BITMAP)
+
+    def _emit_arg(self, node: ast.expr) -> str:
+        """Emit an argument, adding & for engine object references."""
+        expr_str = self._emit_expr(node)
+        t = self._expr_type(node)
+        if self._is_engine_object_type(t):
+            return f"&{expr_str}"
+        return expr_str

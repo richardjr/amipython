@@ -1,0 +1,132 @@
+; amipython example Amiberry configuration
+;
+; This config boots an A1200 with Kickstart 3.1 from a minimal drive
+; (no Workbench needed). amipython generates configs like this automatically
+; via "amipython run", but you can use this as a starting point for manual
+; testing or to understand the emulator settings.
+;
+; Usage:
+;   amiberry -G -f amiberry/example.uae
+;
+; Before using, update the paths below:
+;   - kickstart_rom_file: point to your Kickstart 3.1 ROM
+;   - filesystem2 lines: point to your boot drive and binary directory
+;
+; IMPORTANT: Kickstart 3.2 is NOT compatible with ACE engine programs.
+; You must use Kickstart 3.1 (rev 40.68, A1200).
+
+config_description=amipython example config
+config_hardware=true
+config_host=true
+config_version=7.1.1
+
+; --- GUI ---
+use_gui=no
+use_debugger=false
+
+; --- ROM ---
+; CHANGE THIS to your Kickstart 3.1 ROM path
+kickstart_rom_file=/home/YOURUSER/Emulation/ROMs/Kickstart v3.1 rev 40.68 (1993)(Commodore)(A1200).rom
+kickstart_ext_rom_file=
+pcmcia_mb_rom_file=:ENABLED
+ide_mb_rom_file=:ENABLED
+flash_file=
+cart_file=
+rtc_file=
+kickshifter=false
+
+; --- Floppy ---
+floppy_volume=0
+floppy0=
+floppy1=
+floppy2=
+floppy3=
+nr_floppies=0
+floppy_speed=100
+
+; --- Sound ---
+sound_output=exact
+sound_channels=stereo
+sound_frequency=44100
+sound_interpol=anti
+sound_filter=emulated
+sound_filter_type=enhanced
+sound_volume=0
+
+; --- CPU ---
+cpu_speed=real
+cpu_type=68020
+cpu_model=68020
+cpu_compatible=true
+cpu_24bit_addressing=false
+fpu_strict=false
+cachesize=0
+
+; --- Chipset ---
+chipset=aga
+collision_level=playfields
+chipset_compatible=A1200
+rtc=MSM6242B
+cia_overlay=false
+ksmirror_a8=true
+pcmcia=true
+ide=a600/a1200
+immediate_blits=false
+waiting_blits=automatic
+ntsc=false
+
+; --- Memory ---
+chipmem_size=16
+fastmem_size=0
+mbresmem_size=128
+z3mem_size=0
+bogomem_size=0
+
+; --- Display ---
+gfx_display=0
+gfx_framerate=1
+gfx_width=720
+gfx_height=568
+gfx_width_windowed=720
+gfx_height_windowed=568
+gfx_backbuffers=2
+gfx_lores=false
+gfx_resolution=hires
+gfx_linemode=double2
+gfx_fullscreen_amiga=false
+gfx_colour_mode=32bit
+gfx_api=sdl2
+gfx_api_options=hardware
+multithreaded_drawing=true
+
+; --- Input ---
+joyport0=mouse
+joyport0autofire=none
+joyportfriendlyname0=System mouse
+joyportname0=MOUSE0
+joyport1=none
+joyport1autofire=none
+bsdsocket_emu=false
+input.config=0
+input.mouse_speed=100
+input.autofire_speed=600
+
+; --- Hard drives ---
+; DH0 = Boot drive (minimal, contains S/Startup-Sequence)
+; DH1 = Binary directory (where your compiled Amiga program lives)
+;
+; CHANGE THESE paths to match your setup:
+;   - System: should point to the amiberry_boot directory in this repo
+;   - Run: should point to the directory containing your compiled binary
+;
+; The Startup-Sequence in System:S/ should contain:
+;   Run:your_binary_name
+;
+filesystem2=rw,DH0:System:/path/to/amipython/amiberry_boot,0
+uaehf0=dir,rw,DH0:System:/path/to/amipython/amiberry_boot,0
+filesystem2=ro,DH1:Run:/path/to/your/binary/directory,-128
+uaehf1=dir,ro,DH1:Run:/path/to/your/binary/directory,-128
+
+; --- Misc ---
+kbd_lang=us
+debug_mem=false

@@ -8,7 +8,7 @@ from amipython.pipeline import transpile
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-FIXTURE_NAMES = ["hello", "arithmetic", "functions", "control_flow"]
+FIXTURE_NAMES = ["hello", "arithmetic", "functions", "control_flow", "display1"]
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)

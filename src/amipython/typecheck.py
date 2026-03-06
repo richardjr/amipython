@@ -6,9 +6,11 @@ Pass 2: Walk function bodies and module-level code, inferring expression types.
 
 import ast
 
+from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import TypeCheckError
 from amipython.types import (
     ANNOTATION_MAP,
+    ENGINE_TYPE_MAP,
     AmipyType,
     FunctionInfo,
     TypeInfo,
@@ -34,15 +36,27 @@ def _resolve_annotation(node: ast.expr, lineno: int | None = None) -> AmipyType:
 
 
 def _pass1(tree: ast.Module, info: TypeInfo):
-    """Collect function signatures and global annotated assignments."""
+    """Collect function signatures, global annotated assignments, and engine imports."""
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, ast.ImportFrom):
+            _collect_import(node, info)
+        elif isinstance(node, ast.FunctionDef):
             _collect_function(node, info)
         elif isinstance(node, ast.AnnAssign):
             _collect_global_annotated(node, info)
         elif isinstance(node, ast.Assign):
             # Will be typed in pass 2
             pass
+
+
+def _collect_import(node: ast.ImportFrom, info: TypeInfo):
+    """Register engine imports from 'from amiga import ...'."""
+    for alias in node.names:
+        name = alias.name
+        info.engine_imports.add(name)
+        if name in MODULE_TYPES:
+            info.engine_modules.add(name)
+            info.globals[name] = VariableInfo(name, AmipyType.MODULE)
 
 
 def _collect_function(node: ast.FunctionDef, info: TypeInfo):
@@ -138,6 +152,9 @@ class _TypeChecker(ast.NodeVisitor):
 
         self.current_function = old_func
         self.global_names = old_globals
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        pass  # Already handled in pass 1
 
     def visit_Global(self, node: ast.Global):
         for name in node.names:
@@ -273,6 +290,9 @@ class _TypeChecker(ast.NodeVisitor):
         if isinstance(node, ast.Call):
             return self._infer_call(node)
 
+        if isinstance(node, ast.Attribute):
+            return self._infer_attribute(node)
+
         raise TypeCheckError(
             f"cannot infer type of {type(node).__name__}",
             lineno=getattr(node, "lineno", None),
@@ -303,6 +323,21 @@ class _TypeChecker(ast.NodeVisitor):
                     return self._infer(node.args[0])
                 raise TypeCheckError("abs() takes exactly 1 argument",
                                      lineno=node.lineno)
+            # Engine constructor: Display(...), Bitmap(...)
+            if name in OBJECT_TYPES and name in self.info.engine_imports:
+                return self._infer_engine_constructor(node, name)
+            # Engine builtin: wait_mouse(), vwait()
+            if name in BUILTINS and name in self.info.engine_imports:
+                builtin = BUILTINS[name]
+                if len(node.args) != len(builtin.params):
+                    raise TypeCheckError(
+                        f"'{name}()' expects {len(builtin.params)} arguments, "
+                        f"got {len(node.args)}",
+                        lineno=node.lineno,
+                    )
+                for arg in node.args:
+                    self._infer(arg)
+                return builtin.return_type
             # User-defined function
             if name in self.info.functions:
                 func = self.info.functions[name]
@@ -326,8 +361,112 @@ class _TypeChecker(ast.NodeVisitor):
             raise TypeCheckError(
                 f"unknown function '{name}'", lineno=node.lineno
             )
+        if isinstance(node.func, ast.Attribute):
+            return self._infer_method_call(node)
         raise TypeCheckError(
             "only simple function calls are supported", lineno=node.lineno
+        )
+
+    def _infer_engine_constructor(self, node: ast.Call, name: str) -> AmipyType:
+        obj_type = OBJECT_TYPES[name]
+        ctor = obj_type.constructor
+        expected_pos = len(ctor.positional)
+        if len(node.args) != expected_pos:
+            raise TypeCheckError(
+                f"'{name}()' expects {expected_pos} positional arguments, "
+                f"got {len(node.args)}",
+                lineno=node.lineno,
+            )
+        for arg, param in zip(node.args, ctor.positional):
+            arg_type = self._infer(arg)
+            if arg_type != param.type and not _can_promote(arg_type, param.type):
+                raise TypeCheckError(
+                    f"argument type mismatch for '{param.name}': "
+                    f"expected {param.type.name}, got {arg_type.name}",
+                    lineno=node.lineno,
+                )
+        for kw in node.keywords:
+            if kw.arg not in ctor.keywords:
+                raise TypeCheckError(
+                    f"unknown keyword argument '{kw.arg}' for {name}()",
+                    lineno=node.lineno,
+                )
+            kw_type, _ = ctor.keywords[kw.arg]
+            val_type = self._infer(kw.value)
+            if val_type != kw_type and not _can_promote(val_type, kw_type):
+                raise TypeCheckError(
+                    f"keyword argument '{kw.arg}' type mismatch: "
+                    f"expected {kw_type.name}, got {val_type.name}",
+                    lineno=node.lineno,
+                )
+        return ENGINE_TYPE_MAP[name]
+
+    def _infer_method_call(self, node: ast.Call) -> AmipyType:
+        attr = node.func
+        if not isinstance(attr.value, ast.Name):
+            raise TypeCheckError(
+                "only simple method calls are supported", lineno=node.lineno
+            )
+        obj_name = attr.value.id
+        method_name = attr.attr
+
+        # Module function call: palette.aga(...)
+        if obj_name in self.info.engine_modules:
+            mod = MODULE_TYPES[obj_name]
+            if method_name not in mod.functions:
+                raise TypeCheckError(
+                    f"'{obj_name}' has no function '{method_name}'",
+                    lineno=node.lineno,
+                )
+            func = mod.functions[method_name]
+            if len(node.args) != len(func.params):
+                raise TypeCheckError(
+                    f"'{obj_name}.{method_name}()' expects {len(func.params)} "
+                    f"arguments, got {len(node.args)}",
+                    lineno=node.lineno,
+                )
+            for arg in node.args:
+                self._infer(arg)
+            return func.return_type
+
+        # Object method call: bm.circle_filled(...)
+        var = self._get_var(obj_name, lineno=node.lineno)
+        if var is None:
+            raise TypeCheckError(
+                f"variable '{obj_name}' used before assignment",
+                lineno=node.lineno,
+            )
+        # Find the engine object type for this variable's type
+        obj_type_info = None
+        for ot in OBJECT_TYPES.values():
+            if ENGINE_TYPE_MAP.get(ot.python_name) == var.type:
+                obj_type_info = ot
+                break
+        if obj_type_info is None:
+            raise TypeCheckError(
+                f"'{obj_name}' is not an engine object", lineno=node.lineno
+            )
+        if method_name not in obj_type_info.methods:
+            raise TypeCheckError(
+                f"'{obj_type_info.python_name}' has no method '{method_name}'",
+                lineno=node.lineno,
+            )
+        method = obj_type_info.methods[method_name]
+        if len(node.args) != len(method.params):
+            raise TypeCheckError(
+                f"'{obj_name}.{method_name}()' expects {len(method.params)} "
+                f"arguments, got {len(node.args)}",
+                lineno=node.lineno,
+            )
+        for arg in node.args:
+            self._infer(arg)
+        return method.return_type
+
+    def _infer_attribute(self, node: ast.Attribute) -> AmipyType:
+        """Infer type for attribute access (non-call)."""
+        raise TypeCheckError(
+            "attribute access is only supported in method calls",
+            lineno=node.lineno,
         )
 
 

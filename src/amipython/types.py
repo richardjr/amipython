@@ -10,6 +10,9 @@ class AmipyType(Enum):
     BOOL = auto()
     STR = auto()
     VOID = auto()
+    DISPLAY = auto()
+    BITMAP = auto()
+    MODULE = auto()  # engine module (palette, copper, etc.)
 
 
 # Map Python type annotation names to AmipyType
@@ -27,6 +30,14 @@ C_TYPE_MAP: dict[AmipyType, str] = {
     AmipyType.BOOL: "BOOL",
     AmipyType.STR: "const char *",
     AmipyType.VOID: "void",
+    AmipyType.DISPLAY: "AmipyDisplay",
+    AmipyType.BITMAP: "AmipyBitmap",
+}
+
+# Map engine Python type names to AmipyType
+ENGINE_TYPE_MAP: dict[str, AmipyType] = {
+    "Display": AmipyType.DISPLAY,
+    "Bitmap": AmipyType.BITMAP,
 }
 
 # printf format specifiers for each type
@@ -62,3 +73,7 @@ class TypeInfo:
     locals: dict[str, dict[str, VariableInfo]] = field(default_factory=dict)
     # Expression types: ast node id -> AmipyType
     expr_types: dict[int, AmipyType] = field(default_factory=dict)
+    # Imported engine names (from amiga import Display, palette, etc.)
+    engine_imports: set[str] = field(default_factory=set)
+    # Module variables: names that are engine modules (palette, copper, etc.)
+    engine_modules: set[str] = field(default_factory=set)
