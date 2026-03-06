@@ -59,6 +59,10 @@ Game engine types are imported from the `amiga` module:
 from amiga import Display, Bitmap, palette, wait_mouse
 ```
 
+This import works in two contexts:
+- **Python preview** (`python game.py`) — imports from `src/amiga/`, a pygame-based implementation
+- **Transpilation** (`amipython transpile game.py`) — the transpiler recognises `from amiga import` and generates the corresponding C code
+
 ### Engine Objects
 
 Objects like `Display` and `Bitmap` are created with constructors that support keyword arguments:

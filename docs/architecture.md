@@ -1,23 +1,26 @@
 # Architecture
 
 ```
- game.py (Python subset game script)
-     |
-     v
- [amipython transpiler]  — Python, runs on host
-     |
-     v
- game.c (generated C89 calling engine API)  +  engine (Amiga game runtime)
-     |
-     v
- [m68k cross-compiler]  — vbcc or Bebbo's amiga-gcc
-     |
-     v
- game (native Amiga Hunk executable)
-     |
-     v
- [Amiberry / vamos]  — run and test
+                    game.py (Python subset game script)
+                         |
+            ┌────────────┴────────────┐
+            v                         v
+   [python game.py]          [amipython transpiler]
+            |                         |
+            v                         v
+   pygame preview window     game.c (C89) + engine
+                                      |
+                                      v
+                             [m68k cross-compiler]
+                                      |
+                                      v
+                             game (Amiga Hunk binary)
+                                      |
+                                      v
+                             [Amiberry / vamos]
 ```
+
+Two paths from the same source: **Python preview** for fast iteration (instant, no compilation), and **Amiga compilation** for the real hardware target.
 
 ## Components
 
@@ -30,6 +33,8 @@
 4. **Build system** — Orchestrates the full pipeline: transpile → cross-compile → link → optionally launch Amiberry for testing.
 
 5. **Amiberry integration** — Headless emulator configuration with mounted build output directory for instant test runs.
+
+6. **Python preview module** (`src/amiga/`) — A pygame-based implementation of the engine API that runs natively in Python. Uses 8-bit indexed surfaces for faithful OCS palette emulation. See [Python Preview](preview.md).
 
 ## Cross-Compilation Toolchain
 

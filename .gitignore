@@ -14,8 +14,7 @@ build/
 # Build artifacts in examples (only .py files are source)
 examples/**/*.c
 examples/**/*.h
-examples/hello
-examples/basic/display1
+examples/**/CMakeLists.txt
 
 # IDE
 .vscode/

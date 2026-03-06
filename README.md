@@ -24,8 +24,10 @@ git clone https://github.com/3adapt/amipython.git
 cd amipython
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,preview]"
 ```
+
+The `preview` extra installs [pygame-ce](https://pyga.me/) so you can run amipython scripts directly in Python with a visual preview window — no cross-compilation or emulator needed.
 
 ### Hello World (CLI)
 
@@ -75,11 +77,14 @@ wait_mouse()
 ```
 
 ```bash
-# Build and run in Amiberry (one step)
+# Run directly in Python (instant preview window)
+python examples/basic/display1.py
+
+# Or cross-compile and run on Amiga
 amipython run examples/basic/display1.py
 ```
 
-This produces greyscale concentric circles on a 32-colour OCS display. See [Running in Amiberry](docs/amiberry.md) for setup.
+Running with `python` opens a 3x-scaled preview window using pygame, with faithful OCS palette emulation (indexed colours, 12-bit depth). Click to exit. Cross-compiling with `amipython run` builds a native 68k binary and launches it in [Amiberry](docs/amiberry.md).
 
 ### Running the Tests
 
@@ -123,6 +128,10 @@ The transpiler parses a Python subset and emits C89 calling the game engine API.
 ## Commands
 
 ```bash
+# Python preview (no compilation needed)
+python game.py                       # run directly with pygame preview window
+
+# Transpile and compile
 amipython transpile game.py          # Python → C
 amipython build game.py              # Python → C → Amiga binary (via Docker)
 amipython run game.py                # build + launch in Amiberry
@@ -134,6 +143,7 @@ amipython build-ace-image            # build the ACE Docker image (one-time)
 
 | Document | Contents |
 |---|---|
+| [Python Preview](docs/preview.md) | Running scripts directly in Python with pygame, how it works |
 | [Language Subset](docs/language.md) | Supported Python features, type system, engine imports |
 | [Blitz Comparison](docs/blitz-comparison.md) | 12 side-by-side Blitz Basic → amipython examples, full API coverage tables |
 | [Running in Amiberry](docs/amiberry.md) | Emulator setup, Kickstart 3.1 requirement, troubleshooting |

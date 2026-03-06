@@ -1,0 +1,27 @@
+"""amiga — Python-native preview module for amipython game scripts.
+
+Provides Display, Bitmap, palette, and other engine objects so that
+amipython scripts can run directly in Python with a visual preview window.
+
+    from amiga import Display, Bitmap, palette, wait_mouse
+
+    display = Display(320, 256, bitplanes=5)
+    bm = Bitmap(320, 256, bitplanes=5)
+    palette.aga(1, 255, 0, 0)
+    bm.circle_filled(160, 128, 60, 1)
+    display.show(bm)
+    wait_mouse()
+"""
+
+from amiga._display import Display
+from amiga._bitmap import Bitmap
+from amiga._palette import palette
+from amiga._builtins import wait_mouse, vwait
+
+__all__ = [
+    "Display",
+    "Bitmap",
+    "palette",
+    "wait_mouse",
+    "vwait",
+]
