@@ -16,6 +16,7 @@ class EngineMethod:
     c_name: str
     params: list[EngineParam]
     return_type: AmipyType
+    keywords: dict[str, tuple[AmipyType, object]] = field(default_factory=dict)
 
 
 @dataclass
@@ -95,6 +96,13 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "sprites_behind": EngineMethod(
+                name="sprites_behind",
+                c_name="amipython_display_sprites_behind",
+                params=[],
+                return_type=AmipyType.VOID,
+                keywords={"from_channel": (AmipyType.INT, 4)},
+            ),
         },
     ),
     "Bitmap": EngineObjectType(
@@ -148,6 +156,29 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "line": EngineMethod(
+                name="line",
+                c_name="amipython_bitmap_line",
+                params=[
+                    EngineParam("x1", AmipyType.INT),
+                    EngineParam("y1", AmipyType.INT),
+                    EngineParam("x2", AmipyType.INT),
+                    EngineParam("y2", AmipyType.INT),
+                    EngineParam("color", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "print_at": EngineMethod(
+                name="print_at",
+                c_name="amipython_bitmap_print_at",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("text", AmipyType.STR),
+                ],
+                return_type=AmipyType.VOID,
+                keywords={"color": (AmipyType.INT, 1)},
+            ),
         },
     ),
     "Shape": EngineObjectType(
@@ -168,6 +199,44 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                     EngineParam("h", AmipyType.INT),
                 ],
                 return_type=AmipyType.SHAPE,
+            ),
+        },
+    ),
+    "Sprite": EngineObjectType(
+        python_name="Sprite",
+        c_type="AmipySprite",
+        c_init=None,  # No direct constructor — use Sprite.grab()
+        constructor=None,
+        methods={
+            "show": EngineMethod(
+                name="show",
+                c_name="amipython_sprite_show",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+                keywords={"channel": (AmipyType.INT, 0)},
+            ),
+            "collided": EngineMethod(
+                name="collided",
+                c_name="amipython_sprite_collided",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+        },
+        static_methods={
+            "grab": EngineStaticMethod(
+                name="grab",
+                c_name="amipython_sprite_grab",
+                params=[
+                    EngineParam("bm", AmipyType.BITMAP),
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("w", AmipyType.INT),
+                    EngineParam("h", AmipyType.INT),
+                ],
+                return_type=AmipyType.SPRITE,
             ),
         },
     ),
@@ -203,7 +272,14 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
     ),
     "mouse": EngineModuleType(
         python_name="mouse",
-        functions={},
+        functions={
+            "set_pointer": EngineMethod(
+                name="set_pointer",
+                c_name="amipython_mouse_set_pointer",
+                params=[EngineParam("sprite", AmipyType.SPRITE)],
+                return_type=AmipyType.VOID,
+            ),
+        },
         properties={
             "x": EngineProperty(
                 name="x",
@@ -225,6 +301,27 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
                 c_name="amipython_joy_button",
                 params=[EngineParam("port", AmipyType.INT)],
                 return_type=AmipyType.BOOL,
+            ),
+        },
+    ),
+    "collision": EngineModuleType(
+        python_name="collision",
+        functions={
+            "register": EngineMethod(
+                name="register",
+                c_name="amipython_collision_register",
+                params=[],
+                return_type=AmipyType.VOID,
+                keywords={
+                    "color": (AmipyType.INT, None),
+                    "mask": (AmipyType.INT, None),
+                },
+            ),
+            "check": EngineMethod(
+                name="check",
+                c_name="amipython_collision_check",
+                params=[],
+                return_type=AmipyType.VOID,
             ),
         },
     ),
@@ -251,4 +348,4 @@ BUILTINS: dict[str, EngineBuiltin] = {
     ),
 }
 
-ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table", "mouse"}
+ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table"}

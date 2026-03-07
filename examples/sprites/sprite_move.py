@@ -31,7 +31,7 @@ for k in range(2):
 
 # Animate the sprite moving across the screen
 for k in range(320):
-    vwait()
+    vwait(1)
     player.show(k, 100, channel=0)
 
 wait_mouse()

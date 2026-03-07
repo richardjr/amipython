@@ -70,12 +70,27 @@ typedef struct {
     UBYTE bitplanes;
     struct BitMap *pBitmap;  /* planar bitmap in chip RAM */
 } AmipyShape;
+
+/* Hardware sprite */
+typedef struct {
+    UWORD width, height;
+    UBYTE bitplanes;
+    struct BitMap *pBitmap;  /* source bitmap data */
+    UBYTE ubChannel;         /* last channel used */
+    UBYTE bCollided;         /* set by collision_check() */
+} AmipySprite;
 #else
 /* Host / vbcc stubs — simple data-only struct */
 typedef struct {
     UWORD width, height;
     UBYTE *data;
 } AmipyShape;
+
+typedef struct {
+    UWORD width, height;
+    UBYTE *data;
+    UBYTE bCollided;
+} AmipySprite;
 #endif
 
 void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp);
@@ -95,6 +110,15 @@ void amipython_vwait(LONG n);
 LONG amipython_rnd(LONG n);
 LONG amipython_mouse_x(void);
 LONG amipython_mouse_y(void);
+void amipython_mouse_set_pointer(AmipySprite *sprite);
+void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
+void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel);
+BOOL amipython_sprite_collided(AmipySprite *sprite);
+void amipython_collision_register(LONG color, LONG mask);
+void amipython_collision_check(void);
+void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
+void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color);
+void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel);
 void amipython_sin_table(float *out, LONG n);
 void amipython_cos_table(float *out, LONG n);
 

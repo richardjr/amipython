@@ -197,7 +197,9 @@ class Validator(ast.NodeVisitor):
             is_struct_constructor = (
                 isinstance(node.func, ast.Name) and node.func.id in self.struct_names
             )
-            if not is_engine_constructor and not is_run_call and not is_struct_constructor:
+            # Also allow kwargs on method/module calls (e.g. sprite.show(x, y, channel=0))
+            is_method_call = isinstance(node.func, ast.Attribute)
+            if not (is_engine_constructor or is_run_call or is_struct_constructor or is_method_call):
                 self._reject(node, "keyword arguments are not supported")
         if node.starargs if hasattr(node, "starargs") else False:
             self._reject(node, "star arguments are not supported")

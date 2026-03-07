@@ -56,9 +56,24 @@ def run(update_fn, *, until=None) -> None:
             break
         if until is not None and until():
             break
+        # Update mouse-attached sprite position
+        mouse_sprite = getattr(backend, '_mouse_sprite', None)
+        if mouse_sprite is not None and pygame is not None and backend._initialized:
+            mx, my = pygame.mouse.get_pos()
+            mouse_sprite._x = mx // backend._scale
+            mouse_sprite._y = my // backend._scale
         update_fn()
         if backend._active_surface is not None:
-            backend.present(backend._active_surface)
+            # Render sprites as overlay before presenting
+            sprites = getattr(backend, '_sprites', {})
+            if sprites:
+                overlay = backend._active_surface.copy()
+                for sprite in sprites.values():
+                    if sprite._visible:
+                        overlay.blit(sprite._surface, (sprite._x, sprite._y))
+                backend.present(overlay)
+            else:
+                backend.present(backend._active_surface)
         backend.wait_vblank()
 
 

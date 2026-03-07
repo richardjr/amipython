@@ -101,6 +101,55 @@ LONG amipython_mouse_y(void) {
     return 128;
 }
 
+void amipython_mouse_set_pointer(AmipySprite *sprite) {
+    printf("[input] mouse_set_pointer %ux%u\n", sprite->width, sprite->height);
+}
+
+void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    sprite->width = (UWORD)w;
+    sprite->height = (UWORD)h;
+    sprite->data = NULL;
+    sprite->bCollided = 0;
+    printf("[sprite] grab %ldx%ld from %ux%u at %ld,%ld\n", w, h, bm->width, bm->height, x, y);
+}
+
+void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel) {
+    printf("[sprite] show %ux%u at %ld,%ld ch=%ld\n", sprite->width, sprite->height, x, y, channel);
+}
+
+BOOL amipython_sprite_collided(AmipySprite *sprite) {
+    printf("[sprite] collided -> %d\n", sprite->bCollided);
+    return sprite->bCollided ? TRUE : FALSE;
+}
+
+static LONG s_coll_color = 0;
+static LONG s_coll_mask = 0;
+
+void amipython_collision_register(LONG color, LONG mask) {
+    s_coll_color = color;
+    s_coll_mask = mask;
+    printf("[collision] register color=%ld mask=%ld\n", color, mask);
+}
+
+void amipython_collision_check(void) {
+    printf("[collision] check\n");
+}
+
+void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color) {
+    printf("[bitmap] line %ld,%ld-%ld,%ld color=%ld\n", x1, y1, x2, y2, color);
+    (void)bm;
+}
+
+void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color) {
+    printf("[bitmap] print_at %ld,%ld \"%s\" color=%ld\n", x, y, text, color);
+    (void)bm;
+}
+
+void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
+    printf("[display] sprites_behind from_channel=%ld\n", from_channel);
+    (void)d;
+}
+
 void amipython_sin_table(float *out, LONG n) {
     LONG i;
     printf("[math] sin_table %ld\n", n);

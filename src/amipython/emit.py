@@ -549,6 +549,19 @@ class _Emitter:
         all_args = f"&{var_name}, " + ", ".join(args) if args else f"&{var_name}"
         self._line(f"{obj_type.c_init}({all_args});")
 
+    def _resolve_method_kwargs(self, call: ast.Call, method) -> list[str]:
+        """Resolve positional + keyword args for an EngineMethod, return full arg list."""
+        args_strs = [self._emit_arg(a) for a in call.args]
+        if method.keywords:
+            kw_provided = {kw.arg: self._emit_arg(kw.value) for kw in call.keywords}
+            for kw_name, (kw_type, kw_default) in method.keywords.items():
+                if kw_name in kw_provided:
+                    args_strs.append(kw_provided[kw_name])
+                elif kw_default is not None:
+                    args_strs.append(str(kw_default))
+                # else: required kwarg — type checker ensures it's provided
+        return args_strs
+
     def _emit_method_call_stmt(self, call: ast.Call):
         """Emit method/module function call as statement."""
         attr = call.func
@@ -557,26 +570,27 @@ class _Emitter:
 
         obj_name = attr.value.id
         method_name = attr.attr
-        args_strs = [self._emit_arg(a) for a in call.args]
 
         # Static method: Shape.grab(...)
         if (obj_name in OBJECT_TYPES
                 and obj_name in self.info.engine_imports
                 and method_name in OBJECT_TYPES[obj_name].static_methods):
             static = OBJECT_TYPES[obj_name].static_methods[method_name]
+            args_strs = [self._emit_arg(a) for a in call.args]
             args = ", ".join(args_strs)
             self._line(f"{static.c_name}({args});")
             return
 
-        # Module function: palette.aga(...)
+        # Module function: palette.aga(...), collision.register(color=15, mask=4)
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
+            args_strs = self._resolve_method_kwargs(call, func)
             args = ", ".join(args_strs)
             self._line(f"{func.c_name}({args});")
             return
 
-        # Object method: bm.circle_filled(...)
+        # Object method: bm.circle_filled(...), sprite.show(x, y, channel=0)
         var = self._get_var_info(obj_name)
         if var is None:
             raise EmitError(f"unknown variable '{obj_name}'", lineno=call.lineno)
@@ -592,6 +606,7 @@ class _Emitter:
             )
 
         method = obj_type_info.methods[method_name]
+        args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
             self._line(f"{method.c_name}(&{obj_name}, {args});")
@@ -974,19 +989,20 @@ class _Emitter:
 
         obj_name = attr.value.id
         method_name = attr.attr
-        args_strs = [self._emit_arg(a) for a in call.args]
 
         # Static method: Shape.grab(...)
         if (obj_name in OBJECT_TYPES
                 and obj_name in self.info.engine_imports
                 and method_name in OBJECT_TYPES[obj_name].static_methods):
             static = OBJECT_TYPES[obj_name].static_methods[method_name]
+            args_strs = [self._emit_arg(a) for a in call.args]
             args = ", ".join(args_strs)
             return f"{static.c_name}({args})"
 
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
+            args_strs = self._resolve_method_kwargs(call, func)
             args = ", ".join(args_strs)
             return f"{func.c_name}({args})"
 
@@ -1005,6 +1021,7 @@ class _Emitter:
             )
 
         method = obj_type_info.methods[method_name]
+        args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
             return f"{method.c_name}(&{obj_name}, {args})"
@@ -1020,7 +1037,7 @@ class _Emitter:
         return None
 
     def _is_engine_object_type(self, t: AmipyType) -> bool:
-        return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE)
+        return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE, AmipyType.SPRITE)
 
     def _emit_run(self, call: ast.Call):
         """Emit run(update, until=lambda: expr) as a game loop."""

@@ -733,14 +733,7 @@ class _TypeChecker(ast.NodeVisitor):
                     lineno=node.lineno,
                 )
             func = mod.functions[method_name]
-            if len(node.args) != len(func.params):
-                raise TypeCheckError(
-                    f"'{obj_name}.{method_name}()' expects {len(func.params)} "
-                    f"arguments, got {len(node.args)}",
-                    lineno=node.lineno,
-                )
-            for arg in node.args:
-                self._infer(arg)
+            self._check_method_args(node, func, f"{obj_name}.{method_name}")
             return func.return_type
 
         # Object method call: bm.circle_filled(...)
@@ -766,15 +759,28 @@ class _TypeChecker(ast.NodeVisitor):
                 lineno=node.lineno,
             )
         method = obj_type_info.methods[method_name]
-        if len(node.args) != len(method.params):
+        self._check_method_args(node, method, f"{obj_name}.{method_name}")
+        return method.return_type
+
+    def _check_method_args(self, node: ast.Call, method, label: str):
+        """Validate positional + keyword args for an EngineMethod."""
+        n_positional = len(method.params)
+        if len(node.args) != n_positional:
             raise TypeCheckError(
-                f"'{obj_name}.{method_name}()' expects {len(method.params)} "
+                f"'{label}()' expects {n_positional} positional "
                 f"arguments, got {len(node.args)}",
                 lineno=node.lineno,
             )
         for arg in node.args:
             self._infer(arg)
-        return method.return_type
+        if method.keywords:
+            for kw in node.keywords:
+                if kw.arg not in method.keywords:
+                    raise TypeCheckError(
+                        f"'{label}()' got unexpected keyword argument '{kw.arg}'",
+                        lineno=node.lineno,
+                    )
+                self._infer(kw.value)
 
     def _infer_list_method(
         self, node: ast.Call, list_var: VariableInfo, method_name: str

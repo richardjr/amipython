@@ -13,6 +13,20 @@ from amiga._backend import Backend
 class _MouseModule:
     """Mouse position singleton. Properties return current pointer coordinates."""
 
+    def __init__(self):
+        self._pointer_sprite = None
+
+    def set_pointer(self, sprite) -> None:
+        """Attach a sprite to the mouse pointer."""
+        self._pointer_sprite = sprite
+        sprite._visible = True
+        # Register with backend for rendering
+        backend = Backend.get()
+        if not hasattr(backend, '_sprites'):
+            backend._sprites = {}
+        backend._sprites[id(sprite)] = sprite
+        backend._mouse_sprite = sprite
+
     @property
     def x(self) -> int:
         backend = Backend.get()

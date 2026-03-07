@@ -16,18 +16,22 @@ amipython scripts can run directly in Python with a visual preview window.
 from amiga._display import Display
 from amiga._bitmap import Bitmap
 from amiga._shape import Shape
+from amiga._sprite import Sprite
 from amiga._palette import palette
 from amiga._joy import joy
 from amiga._mouse import mouse
+from amiga._collision import collision
 from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table
 
 __all__ = [
     "Display",
     "Bitmap",
     "Shape",
+    "Sprite",
     "palette",
     "joy",
     "mouse",
+    "collision",
     "wait_mouse",
     "vwait",
     "rnd",

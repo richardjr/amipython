@@ -35,7 +35,7 @@ display.sprites_behind(from_channel=4)
 
 # Move both sprites across the screen
 for k in range(320):
-    vwait()
+    vwait(1)
     player.show(k, 20, channel=0)    # in front of bitmap
     player.show(k, 120, channel=4)   # behind bitmap
 

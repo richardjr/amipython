@@ -2,26 +2,22 @@
 # Based on: AmiBlitz3/Sourcecodes/Examples/blitzmode examples/sprites1.ab3
 #           (sprites_Collision.ab3 / "death star collision example")
 #
-# A small sprite follows the mouse pointer. When the sprite overlaps
-# a filled circle drawn in colour 15 (the "death star"), a collision
-# is detected. Demonstrates hardware sprite/playfield collision using
-# SetColl, DoColl, and PColl.
+# A crosshair follows the mouse pointer. When it overlaps the "death star"
+# circle drawn in colour 15, a collision is detected.
 
-from amiga import Display, Bitmap, Sprite, collision, mouse, joy, rnd, run
+from amiga import Display, Bitmap, Sprite, palette, collision, mouse, joy, rnd, run
 
 display = Display(320, 200, bitplanes=4)
 bm = Bitmap(320, 200, bitplanes=4)
 
+# Set up palette
+palette.set(14, 0, 15, 0)    # green for crosshair + text
+palette.set(15, 15, 15, 15)  # white death star
+
 # Draw a small box to use as the sprite graphic
 bm.box_filled(0, 0, 7, 7, 1)
 player = Sprite.grab(bm, 0, 0, 8, 8)
-
-# Clear and set up the playfield
 bm.clear()
-
-# Scatter some colourful stars (any colour except 15)
-for k in range(100):
-    bm.plot(rnd(320), rnd(200), rnd(14) + 1)
 
 # Draw the "death star" in colour 15
 bm.circle_filled(160, 100, 40, 15)
@@ -32,11 +28,37 @@ collision.register(color=15, mask=4)
 display.show(bm)
 mouse.set_pointer(player)
 
+# Track previous crosshair position for erase
+ox: int = 160
+oy: int = 100
+
 def update():
+    global ox, oy
+    mx: int = mouse.x
+    my: int = mouse.y
+
+    # Erase old crosshair (draw over in black)
+    bm.line(ox - 12, oy, ox + 12, oy, 0)
+    bm.line(ox, oy - 12, ox, oy + 12, 0)
+
+    # Erase old text area
+    bm.box_filled(0, 0, 47, 8, 0)
+
+    # Restore death star where old crosshair may have cut through it
+    bm.circle_filled(160, 100, 40, 15)
+
+    # Draw new crosshair
+    bm.line(mx - 12, my, mx + 12, my, 14)
+    bm.line(mx, my - 12, mx, my + 12, 14)
+
+    # Check collision and show status
     collision.check()
     if player.collided():
-        bm.print_at(0, 0, "BANG!")
+        bm.print_at(0, 0, "BANG!", color=15)
     else:
-        bm.print_at(0, 0, "     ")
+        bm.print_at(0, 0, "MISS", color=14)
 
-run(update, until=joy.button(0))
+    ox = mx
+    oy = my
+
+run(update, until=lambda: joy.button(0))
