@@ -168,8 +168,10 @@ End
 
 **amipython**:
 ```python
+from dataclasses import dataclass
 from amiga import Display, Shape, joy, rnd
 
+@dataclass
 class Ball:
     x: float
     y: float
@@ -555,8 +557,10 @@ End
 
 **amipython**:
 ```python
+from dataclasses import dataclass
 from amiga import Display, Bitmap, mouse, joy, rnd, sin_table, cos_table
 
+@dataclass
 class Star:
     angle: int
     dist: float = 0.0

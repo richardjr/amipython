@@ -57,10 +57,10 @@ class TestAcceptsValid:
 
 
 class TestRejectsInvalid:
-    def test_class_def(self):
+    def test_class_def_no_decorator(self):
         errors = _validate("class Foo:\n    pass")
         assert len(errors) == 1
-        assert "unsupported syntax" in str(errors[0])
+        assert "dataclass" in str(errors[0])
 
     def test_decorator(self):
         errors = _validate("@dec\ndef f():\n    pass")
@@ -75,10 +75,11 @@ class TestRejectsInvalid:
         errors = _validate("import os")
         assert len(errors) >= 1
 
-    def test_for_without_range(self):
-        errors = _validate("for i in x:\n    pass")
+    def test_for_with_function_call(self):
+        """for i in some_func(): not allowed (only range() and names)."""
+        errors = _validate("for i in foo():\n    pass")
         assert len(errors) >= 1
-        assert "range()" in str(errors[0])
+        assert "range()" in str(errors[0]) or "list" in str(errors[0])
 
     def test_default_args(self):
         errors = _validate("def f(x: int = 1):\n    pass")
@@ -111,4 +112,61 @@ class TestRejectsInvalid:
 
     def test_keyword_args_in_call(self):
         errors = _validate("print(end='\\n')")
+        assert len(errors) >= 1
+
+
+DATACLASS_IMPORT = "from dataclasses import dataclass\n"
+
+
+class TestDataclass:
+    def test_accepts_dataclass(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Ball:\n    x: float\n    y: float\n"
+        assert _validate(src) == []
+
+    def test_accepts_dataclass_with_defaults(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Star:\n    x: int\n    speed: float = 1.0\n"
+        assert _validate(src) == []
+
+    def test_rejects_class_without_dataclass_import(self):
+        errors = _validate("@dataclass\nclass Ball:\n    x: float\n")
+        assert len(errors) >= 1
+        assert "requires" in str(errors[0])
+
+    def test_rejects_class_with_methods(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Ball:\n    x: float\n    def move(self):\n        pass\n"
+        errors = _validate(src)
+        assert len(errors) >= 1
+        assert "field declarations" in str(errors[0])
+
+    def test_rejects_class_with_inheritance(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Ball(Base):\n    x: float\n"
+        errors = _validate(src)
+        assert len(errors) >= 1
+        assert "inheritance" in str(errors[0])
+
+    def test_rejects_wrong_decorator(self):
+        src = DATACLASS_IMPORT + "@property\nclass Ball:\n    x: float\n"
+        errors = _validate(src)
+        assert len(errors) >= 1
+        assert "dataclass" in str(errors[0])
+
+    def test_accepts_struct_constructor_kwargs(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0, y=2.0)\n"
+        assert _validate(src) == []
+
+    def test_accepts_for_in_name(self):
+        assert _validate("for i in items:\n    pass") == []
+
+    def test_accepts_empty_list(self):
+        src = DATACLASS_IMPORT + "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+        assert _validate(src) == []
+
+    def test_accepts_len(self):
+        assert _validate("x = len(items)") == []
+
+    def test_accepts_dataclasses_import(self):
+        assert _validate("from dataclasses import dataclass") == []
+
+    def test_rejects_wrong_dataclasses_import(self):
+        errors = _validate("from dataclasses import field")
         assert len(errors) >= 1

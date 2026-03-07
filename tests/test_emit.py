@@ -166,3 +166,82 @@ class TestStructure:
         c = _emit("x: int = 1")
         assert "return 0;" in c
         assert "int main(void)" in c
+
+
+STRUCT_PREAMBLE = "from dataclasses import dataclass\n"
+
+
+class TestStruct:
+    def test_struct_typedef(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\n"
+        c = _emit(src)
+        assert "typedef struct {" in c
+        assert "float x;" in c
+        assert "float y;" in c
+        assert "} Ball;" in c
+
+    def test_struct_init(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0, y=2.0)\n"
+        c = _emit(src)
+        assert "Ball b;" in c
+        assert "b.x = 1.0f;" in c
+        assert "b.y = 2.0f;" in c
+
+    def test_struct_field_access(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0)\nv = b.x\n"
+        c = _emit(src)
+        assert "v = b.x;" in c
+
+    def test_struct_field_assign(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0)\nb.x = 3.0\n"
+        c = _emit(src)
+        assert "b.x = 3.0f;" in c
+
+    def test_struct_field_aug_assign(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0)\nb.x += 0.5\n"
+        c = _emit(src)
+        assert "b.x += 0.5f;" in c
+
+    def test_struct_default_field(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    speed: float = 1.0\nb = Ball(x=5.0)\n"
+        c = _emit(src)
+        assert "b.x = 5.0f;" in c
+        assert "b.speed = 1.0f;" in c
+
+
+class TestList:
+    def test_list_decl(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+        c = _emit(src)
+        assert "Ball balls_items[64];" in c
+        assert "LONG balls_count = 0;" in c
+
+    def test_list_int_decl(self):
+        src = "nums: list[int] = []\n"
+        c = _emit(src)
+        assert "LONG nums_items[64];" in c
+        assert "LONG nums_count = 0;" in c
+
+    def test_list_append_struct(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+            "balls.append(Ball(x=1.0))\n"
+        )
+        c = _emit(src)
+        assert "balls_items[balls_count].x = 1.0f;" in c
+        assert "balls_count++;" in c
+
+    def test_list_len(self):
+        src = "nums: list[int] = []\nn = len(nums)\n"
+        c = _emit(src)
+        assert "n = nums_count;" in c
+
+    def test_list_for_struct(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+            "def update():\n    for b in balls:\n        b.x += 1.0\n"
+        )
+        c = _emit(src)
+        assert "for (b_idx = 0; b_idx < balls_count; b_idx++)" in c
+        assert "b = &balls_items[b_idx];" in c
+        assert "b->x += 1.0f;" in c

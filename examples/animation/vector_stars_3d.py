@@ -7,8 +7,10 @@
 # avoid flicker. Demonstrates lookup tables, 3D rotation, and
 # perspective projection.
 
+from dataclasses import dataclass
 from amiga import Display, Bitmap, palette, mouse, joy, rnd, run, sin_table, cos_table
 
+@dataclass
 class Ball:
     x: float
     y: float

@@ -14,6 +14,8 @@ class AmipyType(Enum):
     BITMAP = auto()
     SHAPE = auto()
     MODULE = auto()  # engine module (palette, copper, etc.)
+    STRUCT = auto()
+    LIST = auto()
 
 
 # Map Python type annotation names to AmipyType
@@ -53,9 +55,26 @@ FORMAT_MAP: dict[AmipyType, str] = {
 
 
 @dataclass
+class StructField:
+    name: str
+    type: AmipyType
+    default: object | None = None  # None = required
+
+
+@dataclass
+class StructInfo:
+    name: str
+    fields: list[StructField]
+
+
+@dataclass
 class VariableInfo:
     name: str
     type: AmipyType
+    struct_name: str | None = None  # when type == STRUCT, identifies which struct
+    list_element_type: AmipyType | None = None  # when type == LIST
+    list_element_struct: str | None = None  # when LIST of STRUCT
+    is_ref: bool = False  # True for loop vars over lists (emitted as pointers)
 
 
 @dataclass
@@ -80,3 +99,9 @@ class TypeInfo:
     engine_imports: set[str] = field(default_factory=set)
     # Module variables: names that are engine modules (palette, copper, etc.)
     engine_modules: set[str] = field(default_factory=set)
+    # User-defined structs (@dataclass classes)
+    structs: dict[str, StructInfo] = field(default_factory=dict)
+    # Expression struct names: ast node id -> struct name (for STRUCT-typed exprs)
+    expr_struct_names: dict[int, str] = field(default_factory=dict)
+    # Expression list element info: ast node id -> (element_type, element_struct)
+    expr_list_info: dict[int, tuple[AmipyType, str | None]] = field(default_factory=dict)

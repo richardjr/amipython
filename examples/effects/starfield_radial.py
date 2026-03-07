@@ -6,8 +6,10 @@
 # register) the further they travel. Uses pre-computed sin/cos lookup
 # tables for fast polar-to-cartesian conversion.
 
+from dataclasses import dataclass
 from amiga import Display, Bitmap, palette, mouse, joy, rnd, clamp, run, sin_table, cos_table
 
+@dataclass
 class Star:
     angle: int
     dist: float = 0.0

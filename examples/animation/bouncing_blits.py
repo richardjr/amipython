@@ -6,8 +6,10 @@
 # so increasing the number of objects will cause flicker.
 # See doublebuffer_balls.py for the flicker-free version.
 
+from dataclasses import dataclass
 from amiga import Display, Bitmap, Shape, joy, rnd, run
 
+@dataclass
 class Ball:
     x: float
     y: float

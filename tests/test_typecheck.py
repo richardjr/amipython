@@ -145,3 +145,97 @@ class TestForRange:
     def test_range_var_is_int(self):
         info = _typecheck("for i in range(10):\n    pass")
         assert info.globals["i"].type == AmipyType.INT
+
+
+STRUCT_PREAMBLE = "from dataclasses import dataclass\n"
+
+
+class TestStruct:
+    def test_struct_definition(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\n"
+        info = _typecheck(src)
+        assert "Ball" in info.structs
+        assert len(info.structs["Ball"].fields) == 2
+        assert info.structs["Ball"].fields[0].name == "x"
+        assert info.structs["Ball"].fields[0].type == AmipyType.FLOAT
+
+    def test_struct_constructor(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0, y=2.0)\n"
+        info = _typecheck(src)
+        assert info.globals["b"].type == AmipyType.STRUCT
+        assert info.globals["b"].struct_name == "Ball"
+
+    def test_struct_field_access(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0, y=2.0)\nv = b.x\n"
+        info = _typecheck(src)
+        assert info.globals["v"].type == AmipyType.FLOAT
+
+    def test_struct_field_assign(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0, y=2.0)\nb.x = 3.0\n"
+        _typecheck(src)  # should not raise
+
+    def test_struct_field_aug_assign(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0)\nb.x += 0.5\n"
+        _typecheck(src)  # should not raise
+
+    def test_struct_missing_required_field(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    y: float\nb = Ball(x=1.0)\n"
+        with pytest.raises(TypeCheckError, match="missing required field 'y'"):
+            _typecheck(src)
+
+    def test_struct_unknown_field(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0, z=2.0)\n"
+        with pytest.raises(TypeCheckError, match="no field 'z'"):
+            _typecheck(src)
+
+    def test_struct_field_type_mismatch(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: int\nb = Ball(x=1.0)\n"
+        with pytest.raises(TypeCheckError):
+            _typecheck(src)
+
+    def test_struct_default_field(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\n    speed: float = 1.0\nb = Ball(x=1.0)\n"
+        _typecheck(src)  # speed uses default, should not raise
+
+    def test_struct_bad_field_access(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nb = Ball(x=1.0)\nv = b.z\n"
+        with pytest.raises(TypeCheckError, match="no field 'z'"):
+            _typecheck(src)
+
+
+class TestList:
+    def test_list_declaration(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+        info = _typecheck(src)
+        assert info.globals["balls"].type == AmipyType.LIST
+        assert info.globals["balls"].list_element_type == AmipyType.STRUCT
+        assert info.globals["balls"].list_element_struct == "Ball"
+
+    def test_list_of_int(self):
+        src = "nums: list[int] = []\n"
+        info = _typecheck(src)
+        assert info.globals["nums"].type == AmipyType.LIST
+        assert info.globals["nums"].list_element_type == AmipyType.INT
+
+    def test_list_append(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\nballs.append(Ball(x=1.0))\n"
+        _typecheck(src)  # should not raise
+
+    def test_list_len(self):
+        src = "nums: list[int] = []\nn = len(nums)\n"
+        info = _typecheck(src)
+        assert info.globals["n"].type == AmipyType.INT
+
+    def test_for_in_list(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
+            "def update():\n    for b in balls:\n        b.x += 1.0\n"
+        )
+        info = _typecheck(src)
+        assert info.locals["update"]["b"].type == AmipyType.STRUCT
+        assert info.locals["update"]["b"].is_ref is True
+
+    def test_list_iterate_non_list(self):
+        src = "x: int = 5\nfor i in x:\n    pass\n"
+        with pytest.raises(TypeCheckError, match="non-list"):
+            _typecheck(src)

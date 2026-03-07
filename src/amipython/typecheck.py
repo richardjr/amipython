@@ -13,6 +13,8 @@ from amipython.types import (
     ENGINE_TYPE_MAP,
     AmipyType,
     FunctionInfo,
+    StructField,
+    StructInfo,
     TypeInfo,
     VariableInfo,
 )
@@ -26,17 +28,39 @@ def typecheck(tree: ast.Module) -> TypeInfo:
     return info
 
 
-def _resolve_annotation(node: ast.expr, lineno: int | None = None) -> AmipyType:
-    """Resolve a type annotation AST node to an AmipyType."""
-    if isinstance(node, ast.Name) and node.id in ANNOTATION_MAP:
-        return ANNOTATION_MAP[node.id]
+def _resolve_annotation(
+    node: ast.expr,
+    lineno: int | None = None,
+    structs: dict[str, StructInfo] | None = None,
+) -> tuple[AmipyType, str | None, AmipyType | None, str | None]:
+    """Resolve a type annotation AST node.
+
+    Returns (type, struct_name, list_element_type, list_element_struct).
+    """
+    if isinstance(node, ast.Name):
+        if node.id in ANNOTATION_MAP:
+            return ANNOTATION_MAP[node.id], None, None, None
+        if structs and node.id in structs:
+            return AmipyType.STRUCT, node.id, None, None
+    if isinstance(node, ast.Subscript):
+        # list[T]
+        if isinstance(node.value, ast.Name) and node.value.id == "list":
+            elem_type, elem_struct, _, _ = _resolve_annotation(
+                node.slice, lineno=lineno, structs=structs
+            )
+            return AmipyType.LIST, None, elem_type, elem_struct
     raise TypeCheckError(
         f"unsupported type annotation: {ast.dump(node)}", lineno=lineno
     )
 
 
 def _pass1(tree: ast.Module, info: TypeInfo):
-    """Collect function signatures, global annotated assignments, and engine imports."""
+    """Collect structs, function signatures, global annotated assignments, and engine imports."""
+    # First pass: collect struct definitions so they can be used in annotations
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            _collect_struct(node, info)
+    # Second pass: everything else
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
             _collect_import(node, info)
@@ -47,6 +71,32 @@ def _pass1(tree: ast.Module, info: TypeInfo):
         elif isinstance(node, ast.Assign):
             # Will be typed in pass 2
             pass
+
+
+def _collect_struct(node: ast.ClassDef, info: TypeInfo):
+    """Collect a @dataclass class as a struct definition."""
+    fields = []
+    for item in node.body:
+        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+            field_type, struct_name, _, _ = _resolve_annotation(
+                item.annotation, lineno=item.lineno, structs=info.structs
+            )
+            if field_type not in (AmipyType.INT, AmipyType.FLOAT, AmipyType.BOOL):
+                raise TypeCheckError(
+                    f"struct field '{item.target.id}' must be int, float, or bool",
+                    lineno=item.lineno,
+                )
+            default = None
+            if item.value is not None:
+                if isinstance(item.value, ast.Constant):
+                    default = item.value.value
+                else:
+                    raise TypeCheckError(
+                        f"struct field default must be a literal",
+                        lineno=item.lineno,
+                    )
+            fields.append(StructField(item.target.id, field_type, default))
+    info.structs[node.name] = StructInfo(node.name, fields)
 
 
 def _collect_import(node: ast.ImportFrom, info: TypeInfo):
@@ -68,12 +118,16 @@ def _collect_function(node: ast.FunctionDef, info: TypeInfo):
                 f"parameter '{arg.arg}' must have a type annotation",
                 lineno=node.lineno,
             )
-        param_type = _resolve_annotation(arg.annotation, lineno=node.lineno)
-        params.append(VariableInfo(arg.arg, param_type))
+        param_type, struct_name, _, _ = _resolve_annotation(
+            arg.annotation, lineno=node.lineno, structs=info.structs
+        )
+        params.append(VariableInfo(arg.arg, param_type, struct_name=struct_name))
 
     return_type = AmipyType.VOID
     if node.returns is not None:
-        return_type = _resolve_annotation(node.returns, lineno=node.lineno)
+        return_type, _, _, _ = _resolve_annotation(
+            node.returns, lineno=node.lineno, structs=info.structs
+        )
 
     info.functions[node.name] = FunctionInfo(node.name, params, return_type)
     info.locals[node.name] = {}
@@ -85,8 +139,15 @@ def _collect_global_annotated(node: ast.AnnAssign, info: TypeInfo):
         raise TypeCheckError(
             "only simple variable annotations are supported", lineno=node.lineno
         )
-    var_type = _resolve_annotation(node.annotation, lineno=node.lineno)
-    info.globals[node.target.id] = VariableInfo(node.target.id, var_type)
+    var_type, struct_name, elem_type, elem_struct = _resolve_annotation(
+        node.annotation, lineno=node.lineno, structs=info.structs
+    )
+    info.globals[node.target.id] = VariableInfo(
+        node.target.id, var_type,
+        struct_name=struct_name,
+        list_element_type=elem_type,
+        list_element_struct=elem_struct,
+    )
 
 
 class _TypeChecker(ast.NodeVisitor):
@@ -112,7 +173,13 @@ class _TypeChecker(ast.NodeVisitor):
             return self.info.globals[name]
         return None
 
-    def _set_var(self, name: str, var_type: AmipyType, lineno: int | None = None):
+    def _set_var(
+        self, name: str, var_type: AmipyType, lineno: int | None = None,
+        struct_name: str | None = None,
+        list_element_type: AmipyType | None = None,
+        list_element_struct: str | None = None,
+        is_ref: bool = False,
+    ):
         """Set a variable's type in the current scope."""
         if self.current_function and name not in self.global_names:
             local = self.info.locals.setdefault(self.current_function, {})
@@ -124,7 +191,13 @@ class _TypeChecker(ast.NodeVisitor):
                         lineno=lineno,
                     )
             else:
-                local[name] = VariableInfo(name, var_type)
+                local[name] = VariableInfo(
+                    name, var_type,
+                    struct_name=struct_name,
+                    list_element_type=list_element_type,
+                    list_element_struct=list_element_struct,
+                    is_ref=is_ref,
+                )
         else:
             if name in self.info.globals:
                 if self.info.globals[name].type != var_type:
@@ -134,7 +207,13 @@ class _TypeChecker(ast.NodeVisitor):
                         lineno=lineno,
                     )
             else:
-                self.info.globals[name] = VariableInfo(name, var_type)
+                self.info.globals[name] = VariableInfo(
+                    name, var_type,
+                    struct_name=struct_name,
+                    list_element_type=list_element_type,
+                    list_element_struct=list_element_struct,
+                    is_ref=is_ref,
+                )
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         old_func = self.current_function
@@ -154,7 +233,7 @@ class _TypeChecker(ast.NodeVisitor):
         self.global_names = old_globals
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        pass  # Already handled in pass 1
+        pass  # Already handled in pass 1 (amiga imports and dataclasses)
 
     def visit_Global(self, node: ast.Global):
         for name in node.names:
@@ -163,24 +242,63 @@ class _TypeChecker(ast.NodeVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign):
         if not isinstance(node.target, ast.Name):
             return
-        var_type = _resolve_annotation(node.annotation, lineno=node.lineno)
+        var_type, struct_name, elem_type, elem_struct = _resolve_annotation(
+            node.annotation, lineno=node.lineno, structs=self.info.structs
+        )
         if node.value is not None:
             val_type = self._infer(node.value)
-            if val_type != var_type and not _can_promote(val_type, var_type):
+            if var_type == AmipyType.LIST:
+                # Allow `[]` empty list literal
+                if not (isinstance(node.value, ast.List) and len(node.value.elts) == 0):
+                    if val_type != var_type:
+                        raise TypeCheckError(
+                            f"type mismatch: annotated as {var_type.name} but "
+                            f"assigned {val_type.name}",
+                            lineno=node.lineno,
+                        )
+            elif val_type != var_type and not _can_promote(val_type, var_type):
                 raise TypeCheckError(
                     f"type mismatch: annotated as {var_type.name} but "
                     f"assigned {val_type.name}",
                     lineno=node.lineno,
                 )
-        self._set_var(node.target.id, var_type, lineno=node.lineno)
+        self._set_var(
+            node.target.id, var_type, lineno=node.lineno,
+            struct_name=struct_name,
+            list_element_type=elem_type,
+            list_element_struct=elem_struct,
+        )
 
     def visit_Assign(self, node: ast.Assign):
         val_type = self._infer(node.value)
         for target in node.targets:
             if isinstance(target, ast.Name):
-                self._set_var(target.id, val_type, lineno=node.lineno)
+                # Struct constructor assignment
+                if (isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Name)
+                        and node.value.func.id in self.info.structs):
+                    struct_name = node.value.func.id
+                    self._set_var(
+                        target.id, AmipyType.STRUCT, lineno=node.lineno,
+                        struct_name=struct_name,
+                    )
+                else:
+                    self._set_var(target.id, val_type, lineno=node.lineno)
+            elif isinstance(target, ast.Attribute):
+                self._check_field_assign(target, val_type, node.lineno)
 
     def visit_AugAssign(self, node: ast.AugAssign):
+        if isinstance(node.target, ast.Attribute):
+            field_type = self._resolve_field_type(node.target)
+            val_type = self._infer(node.value)
+            result_type = _arithmetic_result(field_type, val_type, node.op)
+            if result_type != field_type and not _can_promote(result_type, field_type):
+                raise TypeCheckError(
+                    f"augmented assignment changes field type "
+                    f"from {field_type.name} to {result_type.name}",
+                    lineno=node.lineno,
+                )
+            return
         if isinstance(node.target, ast.Name):
             var = self._get_var(node.target.id, lineno=node.lineno)
             if var is None:
@@ -235,13 +353,35 @@ class _TypeChecker(ast.NodeVisitor):
             self.visit(stmt)
 
     def visit_For(self, node: ast.For):
-        # for i in range(...) — i is always int
-        if isinstance(node.target, ast.Name):
-            self._set_var(node.target.id, AmipyType.INT, lineno=node.lineno)
-        # Type-check range arguments
-        if isinstance(node.iter, ast.Call):
-            for arg in node.iter.args:
-                self._infer(arg)
+        if isinstance(node.iter, ast.Name):
+            # for item in list_var
+            list_var = self._get_var(node.iter.id, lineno=node.lineno)
+            if list_var is None:
+                raise TypeCheckError(
+                    f"variable '{node.iter.id}' used before assignment",
+                    lineno=node.lineno,
+                )
+            if list_var.type != AmipyType.LIST:
+                raise TypeCheckError(
+                    f"cannot iterate over non-list variable '{node.iter.id}'",
+                    lineno=node.lineno,
+                )
+            if isinstance(node.target, ast.Name):
+                elem_type = list_var.list_element_type
+                elem_struct = list_var.list_element_struct
+                self._set_var(
+                    node.target.id, elem_type, lineno=node.lineno,
+                    struct_name=elem_struct,
+                    is_ref=True,  # loop var is a pointer for mutation
+                )
+        else:
+            # for i in range(...) — i is always int
+            if isinstance(node.target, ast.Name):
+                self._set_var(node.target.id, AmipyType.INT, lineno=node.lineno)
+            # Type-check range arguments
+            if isinstance(node.iter, ast.Call):
+                for arg in node.iter.args:
+                    self._infer(arg)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -293,6 +433,15 @@ class _TypeChecker(ast.NodeVisitor):
         if isinstance(node, ast.Attribute):
             return self._infer_attribute(node)
 
+        if isinstance(node, ast.List):
+            # Empty list literal — type comes from annotation context
+            if len(node.elts) == 0:
+                return AmipyType.LIST
+            raise TypeCheckError(
+                "only empty list literals are supported (use .append())",
+                lineno=getattr(node, "lineno", None),
+            )
+
         raise TypeCheckError(
             f"cannot infer type of {type(node).__name__}",
             lineno=getattr(node, "lineno", None),
@@ -323,6 +472,18 @@ class _TypeChecker(ast.NodeVisitor):
                     return self._infer(node.args[0])
                 raise TypeCheckError("abs() takes exactly 1 argument",
                                      lineno=node.lineno)
+            if name == "len":
+                if len(node.args) != 1:
+                    raise TypeCheckError("len() takes exactly 1 argument",
+                                         lineno=node.lineno)
+                arg_type = self._infer(node.args[0])
+                if arg_type != AmipyType.LIST:
+                    raise TypeCheckError("len() argument must be a list",
+                                         lineno=node.lineno)
+                return AmipyType.INT
+            # Struct constructor: Ball(x=10, y=20)
+            if name in self.info.structs:
+                return self._infer_struct_constructor(node, name)
             # Engine constructor: Display(...), Bitmap(...)
             if name in OBJECT_TYPES and name in self.info.engine_imports:
                 return self._infer_engine_constructor(node, name)
@@ -450,6 +611,49 @@ class _TypeChecker(ast.NodeVisitor):
             )
         return AmipyType.VOID
 
+    def _infer_struct_constructor(self, node: ast.Call, name: str) -> AmipyType:
+        """Type-check a struct constructor call like Ball(x=10, y=20)."""
+        struct = self.info.structs[name]
+        if node.args:
+            raise TypeCheckError(
+                f"struct '{name}' constructor only accepts keyword arguments",
+                lineno=node.lineno,
+            )
+        provided = set()
+        for kw in node.keywords:
+            if kw.arg is None:
+                raise TypeCheckError(
+                    f"**kwargs not supported in struct constructor",
+                    lineno=node.lineno,
+                )
+            field = None
+            for f in struct.fields:
+                if f.name == kw.arg:
+                    field = f
+                    break
+            if field is None:
+                raise TypeCheckError(
+                    f"struct '{name}' has no field '{kw.arg}'",
+                    lineno=node.lineno,
+                )
+            val_type = self._infer(kw.value)
+            if val_type != field.type and not _can_promote(val_type, field.type):
+                raise TypeCheckError(
+                    f"field '{kw.arg}' type mismatch: expected {field.type.name}, "
+                    f"got {val_type.name}",
+                    lineno=node.lineno,
+                )
+            provided.add(kw.arg)
+        # Check all required fields (those without defaults) are provided
+        for field in struct.fields:
+            if field.name not in provided and field.default is None:
+                raise TypeCheckError(
+                    f"struct '{name}' missing required field '{field.name}'",
+                    lineno=node.lineno,
+                )
+        self.info.expr_struct_names[id(node)] = name
+        return AmipyType.STRUCT
+
     def _infer_method_call(self, node: ast.Call) -> AmipyType:
         attr = node.func
         if not isinstance(attr.value, ast.Name):
@@ -458,6 +662,11 @@ class _TypeChecker(ast.NodeVisitor):
             )
         obj_name = attr.value.id
         method_name = attr.attr
+
+        # List method call: balls.append(...), balls.remove(...)
+        var = self._get_var(obj_name, lineno=node.lineno)
+        if var and var.type == AmipyType.LIST:
+            return self._infer_list_method(node, var, method_name)
 
         # Static method call: Shape.grab(...)
         if obj_name in OBJECT_TYPES and obj_name in self.info.engine_imports:
@@ -515,6 +724,52 @@ class _TypeChecker(ast.NodeVisitor):
             self._infer(arg)
         return method.return_type
 
+    def _infer_list_method(
+        self, node: ast.Call, list_var: VariableInfo, method_name: str
+    ) -> AmipyType:
+        """Type-check list method calls."""
+        if method_name == "append":
+            if len(node.args) != 1:
+                raise TypeCheckError(
+                    "list.append() takes exactly 1 argument",
+                    lineno=node.lineno,
+                )
+            arg_type = self._infer(node.args[0])
+            if list_var.list_element_type == AmipyType.STRUCT:
+                if arg_type != AmipyType.STRUCT:
+                    raise TypeCheckError(
+                        f"list.append() type mismatch: expected struct, got {arg_type.name}",
+                        lineno=node.lineno,
+                    )
+                # Check struct name matches
+                arg_struct = self.info.expr_struct_names.get(id(node.args[0]))
+                if arg_struct != list_var.list_element_struct:
+                    raise TypeCheckError(
+                        f"list.append() struct type mismatch: expected {list_var.list_element_struct}, "
+                        f"got {arg_struct}",
+                        lineno=node.lineno,
+                    )
+            elif arg_type != list_var.list_element_type and not _can_promote(
+                arg_type, list_var.list_element_type
+            ):
+                raise TypeCheckError(
+                    f"list.append() type mismatch: expected {list_var.list_element_type.name}, "
+                    f"got {arg_type.name}",
+                    lineno=node.lineno,
+                )
+            return AmipyType.VOID
+        if method_name == "remove":
+            if len(node.args) != 1:
+                raise TypeCheckError(
+                    "list.remove() takes exactly 1 argument",
+                    lineno=node.lineno,
+                )
+            self._infer(node.args[0])
+            return AmipyType.VOID
+        raise TypeCheckError(
+            f"list has no method '{method_name}'", lineno=node.lineno
+        )
+
     def _infer_static_method_call(
         self, node: ast.Call, class_name: str, method_name: str
     ) -> AmipyType:
@@ -536,11 +791,53 @@ class _TypeChecker(ast.NodeVisitor):
         return static.return_type
 
     def _infer_attribute(self, node: ast.Attribute) -> AmipyType:
-        """Infer type for attribute access (non-call)."""
+        """Infer type for attribute access (field access on structs)."""
+        if isinstance(node.value, ast.Name):
+            var = self._get_var(node.value.id, lineno=node.lineno)
+            if var and var.type == AmipyType.STRUCT and var.struct_name:
+                return self._resolve_field_type(node)
         raise TypeCheckError(
-            "attribute access is only supported in method calls",
+            "attribute access is only supported on struct fields and in method calls",
             lineno=node.lineno,
         )
+
+    def _resolve_field_type(self, node: ast.Attribute) -> AmipyType:
+        """Resolve a struct field's type from an attribute node."""
+        if not isinstance(node.value, ast.Name):
+            raise TypeCheckError(
+                "only simple field access is supported", lineno=node.lineno
+            )
+        var = self._get_var(node.value.id, lineno=node.lineno)
+        if var is None:
+            raise TypeCheckError(
+                f"variable '{node.value.id}' used before assignment",
+                lineno=node.lineno,
+            )
+        if var.type != AmipyType.STRUCT or not var.struct_name:
+            raise TypeCheckError(
+                f"'{node.value.id}' is not a struct", lineno=node.lineno
+            )
+        struct = self.info.structs.get(var.struct_name)
+        if struct is None:
+            raise TypeCheckError(
+                f"unknown struct '{var.struct_name}'", lineno=node.lineno
+            )
+        for field in struct.fields:
+            if field.name == node.attr:
+                return field.type
+        raise TypeCheckError(
+            f"struct '{var.struct_name}' has no field '{node.attr}'",
+            lineno=node.lineno,
+        )
+
+    def _check_field_assign(self, target: ast.Attribute, val_type: AmipyType, lineno: int | None):
+        """Type-check assignment to a struct field."""
+        field_type = self._resolve_field_type(target)
+        if val_type != field_type and not _can_promote(val_type, field_type):
+            raise TypeCheckError(
+                f"field type mismatch: expected {field_type.name}, got {val_type.name}",
+                lineno=lineno,
+            )
 
 
 def _literal_type(node: ast.Constant) -> AmipyType:
@@ -602,4 +899,6 @@ def _pass2(tree: ast.Module, info: TypeInfo):
     """Walk all code, infer types, check consistency."""
     checker = _TypeChecker(info)
     for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            continue  # Handled in pass 1
         checker.visit(node)

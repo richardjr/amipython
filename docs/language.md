@@ -6,21 +6,40 @@ amipython is not full Python. It is a restricted subset sufficient for game logi
 
 - Variables with type annotations (`x: int = 42`)
 - Functions with annotated parameters and return types
-- `if`/`elif`/`else`, `while`, `for i in range()`
+- `if`/`elif`/`else`, `while`, `for i in range()`, `for item in list_var`
 - `break`, `continue`, `pass`
 - `global` declarations
 - `print()` with multiple arguments
 - Basic types: `int`, `float`, `bool`, `str`
+- `@dataclass` classes (maps to C structs)
+- `list[T]` typed lists with `.append()`, `.remove()`, `len()`
 - Arithmetic with Python semantics (floor division, modulo, power)
 - Boolean operators: `and`, `or`, `not`
 - Comparison chaining: `a < b < c`
 - `from amiga import ...` for engine types and builtins
+- `from dataclasses import dataclass` for struct definitions
 
-## Planned Features
+## Supported Python Data Types
 
-- Collections: `list` (typed, homogeneous), `tuple`
-- Classes with type-annotated fields (maps to C structs)
-- f-strings (limited)
+| Python Type | C89 Type | Notes |
+|---|---|---|
+| `int` | `LONG` | 32-bit signed (vbcc int is 16-bit on 68k) |
+| `float` | `float` | IEEE single-precision |
+| `bool` | `BOOL` | 0 or 1 |
+| `str` | `const char *` | Immutable literals only |
+| `@dataclass class` | `typedef struct` | Fields: int, float, bool only. No methods, no inheritance |
+| `list[T]` | Fixed-capacity array | Max 64 elements. T can be int, float, bool, or dataclass |
+
+## Supported Python Builtins
+
+| Builtin | Notes |
+|---|---|
+| `print()` | Multiple args, int/float/bool/str |
+| `range(n)`, `range(a,b)`, `range(a,b,step)` | For loops |
+| `int()` | Float-to-int conversion |
+| `float()` | Int-to-float conversion |
+| `abs()` | Absolute value |
+| `len()` | List length |
 
 ## Type System
 
@@ -33,13 +52,96 @@ name = "hello"       # inferred as str
 flag = True          # inferred as bool
 ```
 
+### Dataclass Structs
+
+Use `@dataclass` from Python's stdlib to define data structs:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Ball:
+    x: float
+    y: float
+    speed: float = 1.0   # default value
+
+b = Ball(x=10.0, y=20.0)       # speed defaults to 1.0
+b.x += 0.5                      # field access and mutation
+```
+
+This maps to C:
+```c
+typedef struct {
+    float x;
+    float y;
+    float speed;
+} Ball;
+
+Ball b;
+b.x = 10.0f;
+b.y = 20.0f;
+b.speed = 1.0f;
+b.x += 0.5f;
+```
+
+Struct rules:
+- Fields must be `int`, `float`, or `bool`
+- No methods — use standalone functions
+- No inheritance
+- Constructor uses keyword arguments only
+
+### Typed Lists
+
+Lists are fixed-capacity (64 elements) typed arrays:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Ball:
+    x: float
+    y: float
+
+balls: list[Ball] = []
+balls.append(Ball(x=10.0, y=20.0))
+
+for b in balls:
+    b.x += 1.0    # b is a reference — mutations persist
+
+n = len(balls)     # current count
+```
+
+This maps to C:
+```c
+Ball balls_items[64];
+LONG balls_count = 0;
+
+balls_items[balls_count].x = 10.0f;
+balls_items[balls_count].y = 20.0f;
+balls_count++;
+
+for (b_idx = 0; b_idx < balls_count; b_idx++) {
+    b = &balls_items[b_idx];
+    b->x += 1.0f;
+}
+
+n = balls_count;
+```
+
+List rules:
+- Element type can be `int`, `float`, `bool`, or a `@dataclass` struct
+- Maximum 64 elements per list
+- `for item in list:` gives a pointer for struct lists (mutations persist)
+- `.append(item)` and `.remove(item)` supported
+- `len(list)` returns current count
+
 ### Type Mapping
 
 | Python | C89 | Notes |
 |---|---|---|
 | `int` | `LONG` | 32-bit — vbcc's `int` is 16-bit on 68k |
-| `float` | `double` | IEEE 754 double |
-| `bool` | `LONG` | 0 or 1 |
+| `float` | `float` | IEEE single-precision |
+| `bool` | `BOOL` | 0 or 1 |
 | `str` | `const char *` | String literals only (no mutation) |
 
 ### Arithmetic Semantics
@@ -100,11 +202,18 @@ vwait()         # wait for vertical blank
 
 ## Not Supported (by design)
 
+- `dict`, `set`, `frozenset`, `tuple` — too dynamic for 68k static allocation
+- `None` — no null pointers; all variables must be initialized
+- `bytes`, `bytearray`, `complex` — not needed for game logic
+- String operations (concatenation, slicing, methods) — strings are immutable literals
+- `@dataclass` methods — structs are data-only, use standalone functions
+- Nested lists, `list[list[T]]` — flat structures only
+- List comprehensions, generator expressions — use explicit for loops
+- Dynamic memory allocation — fixed-capacity arrays, stack structs
+- `*args`, `**kwargs` on user functions
+- Closures, decorators (except `@dataclass`), generators, `yield`
+- `try`/`except`, `with`, `async`/`await`
+- `import` (except `from dataclasses import dataclass` and `from amiga import ...`)
 - `eval()`, `exec()`, `getattr()`, `setattr()`
-- Metaclasses, decorators, generators, closures
-- `*args`, `**kwargs` (except engine constructor kwargs)
-- List comprehensions, dict comprehensions
-- `try`/`except`, `with`, `yield`
-- `import` (except `from amiga import ...`)
-- Dynamic typing, duck typing
+- Metaclasses, duck typing
 - Garbage collection — all memory is statically allocated or arena-managed

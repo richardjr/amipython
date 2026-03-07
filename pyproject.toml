@@ -18,6 +18,9 @@ dev = [
 preview = [
     "pygame-ce>=2.4",
 ]
+adf = [
+    "amitools @ git+https://github.com/cnvogelg/amitools.git@main",
+]
 
 [project.scripts]
 amipython = "amipython.cli:main"

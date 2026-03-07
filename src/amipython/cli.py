@@ -91,6 +91,57 @@ def build_ace_image():
 @main.command()
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Output .adf file path (default: source stem with .adf extension)")
+@click.option("--no-build", is_flag=True, help="Skip build, package existing binary")
+@click.option("--no-boot", is_flag=True, help="Create data-only disk (not bootable)")
+@click.option("--label", type=str, default=None, help="Volume label (default: source stem)")
+def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label: str | None):
+    """Build and package into a bootable ADF floppy image."""
+    from amipython.adf import create_adf
+
+    binary = source.with_suffix("")
+
+    if not no_build:
+        from amipython.docker import cross_compile
+        from amipython.pipeline import transpile as do_transpile
+
+        try:
+            code = source.read_text()
+            c_code = do_transpile(code, filename=str(source))
+        except AmipythonError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+        c_file = source.with_suffix(".c")
+        c_file.write_text(c_code)
+
+        header_dir = _header_dir()
+        _copy_runtime(c_file.parent, c_code)
+
+        try:
+            binary = cross_compile(c_file, binary, header_dir)
+            click.echo(f"Built {binary}")
+        except AmipythonError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+    elif not binary.exists():
+        click.echo(f"Error: binary not found: {binary}", err=True)
+        sys.exit(1)
+
+    if output is None:
+        output = source.with_suffix(".adf")
+
+    try:
+        result = create_adf(binary, output, label=label, bootable=not no_boot)
+        click.echo(f"Created {result} ({result.stat().st_size:,} bytes)")
+    except AmipythonError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Output binary path (default: source stem without extension)")
 @click.option("--no-build", is_flag=True, help="Skip build, run existing binary")
 def run(source: Path, output: Path | None, no_build: bool):

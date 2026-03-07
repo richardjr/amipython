@@ -7,8 +7,10 @@
 # out over time. When the fade completes, the explosion resets.
 # Demonstrates particle systems with pre-computed trig lookup tables.
 
+from dataclasses import dataclass
 from amiga import Display, Bitmap, palette, joy, key, rnd, clamp, run, sin_table, cos_table
 
+@dataclass
 class Particle:
     x: float
     y: float

@@ -6,8 +6,10 @@
 # handles UnQueue and QBlit calls. For flicker-free animation with
 # more objects, see doublebuffer_balls.py.
 
+from dataclasses import dataclass
 from amiga import Display, Shape, joy, rnd, run
 
+@dataclass
 class Ball:
     x: float
     y: float

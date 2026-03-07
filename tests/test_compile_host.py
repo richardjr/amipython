@@ -298,6 +298,118 @@ run(update, until=lambda: joy.button(0))
         # The loop runs 3 times before joy.button returns TRUE
         assert output.count("[input] vwait") == 3
 
+class TestStruct:
+    def test_struct_basic(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Point:
+    x: int
+    y: int
+
+p = Point(x=10, y=20)
+print("x =", p.x)
+print("y =", p.y)
+''')
+        assert "x = 10" in output
+        assert "y = 20" in output
+
+    def test_struct_field_mutation(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Ball:
+    x: float
+    y: float
+
+b = Ball(x=1.0, y=2.0)
+b.x += 0.5
+b.y = b.y * 2.0
+print("x =", b.x)
+print("y =", b.y)
+''')
+        assert "x = 1.5" in output
+        assert "y = 4.0" in output
+
+    def test_struct_with_defaults(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Star:
+    angle: int
+    speed: float = 1.0
+
+s = Star(angle=45)
+print("angle =", s.angle)
+print("speed =", s.speed)
+''')
+        assert "angle = 45" in output
+        assert "speed = 1.0" in output
+
+
+class TestList:
+    def test_list_of_int(self):
+        output = _compile_and_run('''
+nums: list[int] = []
+for i in range(5):
+    nums.append(i * 10)
+print("len =", len(nums))
+for n in nums:
+    print(n)
+''')
+        assert "len = 5" in output
+        lines = output.strip().split("\n")
+        assert "0" in lines[1].strip()
+        assert "40" in lines[5].strip()
+
+    def test_list_of_struct(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Ball:
+    x: float
+    y: float
+
+balls: list[Ball] = []
+balls.append(Ball(x=10.0, y=20.0))
+balls.append(Ball(x=30.0, y=40.0))
+
+print("count =", len(balls))
+for b in balls:
+    print("x =", b.x)
+''')
+        assert "count = 2" in output
+        assert "x = 10.0" in output
+        assert "x = 30.0" in output
+
+    def test_list_struct_mutation(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Ball:
+    x: float
+
+balls: list[Ball] = []
+balls.append(Ball(x=1.0))
+balls.append(Ball(x=2.0))
+
+for b in balls:
+    b.x += 10.0
+
+for b in balls:
+    print(b.x)
+''')
+        lines = output.strip().split("\n")
+        assert "11.0" in lines[0].strip()
+        assert "12.0" in lines[1].strip()
+
+
+class TestEngine:
     def test_display1_example(self):
         output = _compile_and_run('''
 from amiga import Display, Bitmap, palette, wait_mouse

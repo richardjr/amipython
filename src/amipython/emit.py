@@ -81,6 +81,10 @@ class _Emitter:
         for t in self.info.expr_types.values():
             if t == AmipyType.FLOAT:
                 return True
+        for struct in self.info.structs.values():
+            for field in struct.fields:
+                if field.type == AmipyType.FLOAT:
+                    return True
         return False
 
     def emit_module(self, tree: ast.Module) -> str:
@@ -92,6 +96,12 @@ class _Emitter:
         if self.info.engine_imports:
             self._line('#include "amipython_engine.h"')
         self._line()
+
+        # Emit struct typedefs
+        if self.info.structs:
+            for struct in self.info.structs.values():
+                self._emit_struct_typedef(struct)
+            self._line()
 
         # Collect function declarations (forward declarations)
         functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
@@ -113,6 +123,16 @@ class _Emitter:
 
         return "\n".join(self.lines) + "\n"
 
+    def _emit_struct_typedef(self, struct):
+        """Emit a C struct typedef from a StructInfo."""
+        self._line(f"typedef struct {{")
+        self.indent += 1
+        for field in struct.fields:
+            self._line(f"{self._var_decl(field.type, field.name)};")
+        self.indent -= 1
+        self._line(f"}} {struct.name};")
+        self._line()
+
     def _emit_forward_decl(self, node: ast.FunctionDef):
         func = self.info.functions[node.name]
         params = ", ".join(
@@ -128,10 +148,39 @@ class _Emitter:
         for name, var in self.info.globals.items():
             if var.type == AmipyType.MODULE:
                 continue  # modules aren't C variables
-            self._line(f"{self._var_decl(var.type, name)};")
+            if var.type == AmipyType.STRUCT and var.struct_name:
+                if var.is_ref:
+                    self._line(f"{var.struct_name} *{name};")
+                else:
+                    self._line(f"{var.struct_name} {name};")
+            elif var.type == AmipyType.LIST:
+                self._emit_list_decl(name, var)
+            else:
+                self._line(f"{self._var_decl(var.type, name)};")
             declared.add(name)
         if declared:
             self._line()
+
+    def _emit_list_decl(self, name: str, var: VariableInfo):
+        """Emit parallel-variable declarations for a list."""
+        if var.list_element_type == AmipyType.STRUCT and var.list_element_struct:
+            elem_c = var.list_element_struct
+        else:
+            elem_c = C_TYPE_MAP.get(var.list_element_type, "LONG")
+        self._line(f"{elem_c} {name}_items[64];")
+        self._line(f"LONG {name}_count = 0;")
+
+    def _emit_var_decl_for_local(self, name: str, var: VariableInfo):
+        """Emit a local variable declaration, handling structs, lists, and refs."""
+        if var.type == AmipyType.STRUCT and var.struct_name:
+            if var.is_ref:
+                self._line(f"{var.struct_name} *{name};")
+            else:
+                self._line(f"{var.struct_name} {name};")
+        elif var.type == AmipyType.LIST:
+            self._emit_list_decl(name, var)
+        else:
+            self._line(f"{self._var_decl(var.type, name)};")
 
     def _emit_function(self, node: ast.FunctionDef):
         func = self.info.functions[node.name]
@@ -149,9 +198,15 @@ class _Emitter:
         local_vars = {
             k: v for k, v in locals_dict.items() if k not in param_names
         }
+        # Also need index vars for list iteration
+        for_idx_vars = set()
+        self._collect_for_idx_vars(node.body, for_idx_vars)
         for var_name, var_info in local_vars.items():
-            self._line(f"{self._var_decl(var_info.type, var_name)};")
-        if local_vars:
+            self._emit_var_decl_for_local(var_name, var_info)
+        for idx_var in sorted(for_idx_vars):
+            if idx_var not in local_vars and idx_var not in param_names:
+                self._line(f"LONG {idx_var};")
+        if local_vars or for_idx_vars:
             self._line()
 
         # Emit function body (skip Global statements)
@@ -163,12 +218,28 @@ class _Emitter:
         self._line("}")
         self._line()
 
+    def _collect_for_idx_vars(self, stmts: list, out: set):
+        """Collect _idx variable names needed for list iteration loops."""
+        for stmt in stmts:
+            if isinstance(stmt, ast.For) and isinstance(stmt.iter, ast.Name):
+                # for x in list_var -> x_idx
+                list_var = self._get_var_info(stmt.iter.id)
+                if list_var and list_var.type == AmipyType.LIST:
+                    if isinstance(stmt.target, ast.Name):
+                        out.add(f"{stmt.target.id}_idx")
+                self._collect_for_idx_vars(stmt.body, out)
+            elif isinstance(stmt, ast.If):
+                self._collect_for_idx_vars(stmt.body, out)
+                self._collect_for_idx_vars(stmt.orelse, out)
+            elif isinstance(stmt, ast.While):
+                self._collect_for_idx_vars(stmt.body, out)
+
     def _emit_main(self, tree: ast.Module):
         """Emit the main function from module-level statements."""
         has_engine = bool(self.info.engine_imports)
-        # Collect module-level statements (non-function-defs, non-imports)
+        # Collect module-level statements (non-function-defs, non-imports, non-classes)
         stmts = [n for n in tree.body
-                 if not isinstance(n, (ast.FunctionDef, ast.ImportFrom))]
+                 if not isinstance(n, (ast.FunctionDef, ast.ImportFrom, ast.ClassDef))]
         if not stmts:
             self._line("int main(void) {")
             self.indent += 1
@@ -182,6 +253,14 @@ class _Emitter:
 
         self._line("int main(void) {")
         self.indent += 1
+
+        # Declare index vars needed for list iteration at main scope
+        for_idx_vars = set()
+        self._collect_for_idx_vars(stmts, for_idx_vars)
+        for idx_var in sorted(for_idx_vars):
+            self._line(f"LONG {idx_var};")
+        if for_idx_vars:
+            self._line()
 
         if has_engine:
             self._line("amipython_engine_create();")
@@ -256,15 +335,39 @@ class _Emitter:
                     else:
                         self._line(f"{static.c_name}(&{target.id});")
                     return
+            # Struct constructor: ball = Ball(x=10, y=20)
+            if (isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in self.info.structs):
+                self._emit_struct_init(target.id, node.value)
+                return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")
+        elif isinstance(target, ast.Attribute):
+            # Field assignment: ball.x = 10
+            val = self._emit_expr(node.value)
+            obj_expr = self._emit_field_target(target)
+            self._line(f"{obj_expr} = {val};")
 
     def _emit_ann_assign(self, node: ast.AnnAssign):
         if isinstance(node.target, ast.Name) and node.value is not None:
+            # Skip empty list literal — declaration handles it
+            if isinstance(node.value, ast.List) and len(node.value.elts) == 0:
+                # Reset count to 0 (already initialized in declaration)
+                var = self._get_var_info(node.target.id)
+                if var and var.type == AmipyType.LIST:
+                    self._line(f"{node.target.id}_count = 0;")
+                return
             val = self._emit_expr(node.value)
             self._line(f"{node.target.id} = {val};")
 
     def _emit_aug_assign(self, node: ast.AugAssign):
+        if isinstance(node.target, ast.Attribute):
+            target = self._emit_field_target(node.target)
+            op = self._binop_symbol(node.op)
+            val = self._emit_expr(node.value)
+            self._line(f"{target} {op}= {val};")
+            return
         if isinstance(node.target, ast.Name):
             target = node.target.id
             op = self._binop_symbol(node.op)
@@ -305,8 +408,14 @@ class _Emitter:
                     args = ", ".join(self._emit_expr(a) for a in call.args)
                     self._line(f"{builtin.c_name}({args});")
                     return
-            # Method call: bm.circle_filled(...) or palette.aga(...)
+            # Method call: bm.circle_filled(...), palette.aga(...), balls.append(...)
             if isinstance(call.func, ast.Attribute):
+                # Check if it's a list method
+                if isinstance(call.func.value, ast.Name):
+                    list_var = self._get_var_info(call.func.value.id)
+                    if list_var and list_var.type == AmipyType.LIST:
+                        self._emit_list_method_stmt(call, list_var)
+                        return
                 self._emit_method_call_stmt(call)
                 return
         # General expression statement
@@ -330,6 +439,42 @@ class _Emitter:
             else:
                 self._line(f"amipython_print_str({val});")
         self._line("amipython_print_newline();")
+
+    def _emit_struct_init(self, var_name: str, call: ast.Call):
+        """Emit struct constructor as field-by-field assignment."""
+        struct_name = call.func.id
+        struct = self.info.structs[struct_name]
+        # Check if target is a ref (pointer from list iteration)
+        var = self._get_var_info(var_name)
+        accessor = "->" if (var and var.is_ref) else "."
+
+        # Build map of provided kwargs
+        provided = {}
+        for kw in call.keywords:
+            provided[kw.arg] = self._emit_expr(kw.value)
+        # Emit assignments for all fields (provided + defaults)
+        for field in struct.fields:
+            if field.name in provided:
+                self._line(f"{var_name}{accessor}{field.name} = {provided[field.name]};")
+            elif field.default is not None:
+                default_val = self._format_default(field.default, field.type)
+                self._line(f"{var_name}{accessor}{field.name} = {default_val};")
+
+    def _format_default(self, value, field_type: AmipyType) -> str:
+        """Format a default value for a struct field."""
+        if isinstance(value, bool):
+            return "TRUE" if value else "FALSE"
+        if isinstance(value, float):
+            return f"{value!r}f"
+        return str(value)
+
+    def _emit_field_target(self, node: ast.Attribute) -> str:
+        """Emit a field access target, using -> for refs and . for values."""
+        if not isinstance(node.value, ast.Name):
+            raise EmitError("unsupported field target", lineno=node.lineno)
+        var = self._get_var_info(node.value.id)
+        accessor = "->" if (var and var.is_ref) else "."
+        return f"{node.value.id}{accessor}{node.attr}"
 
     def _emit_engine_init(self, var_name: str, call: ast.Call):
         """Emit engine constructor as init call: amipython_display_init(&d, ...)."""
@@ -398,6 +543,70 @@ class _Emitter:
         else:
             self._line(f"{method.c_name}(&{obj_name});")
 
+    def _emit_list_method_stmt(self, call: ast.Call, list_var: VariableInfo):
+        """Emit list method call (append, remove)."""
+        list_name = call.func.value.id
+        method_name = call.func.attr
+
+        if method_name == "append":
+            arg = call.args[0]
+            if (isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Name)
+                    and arg.func.id in self.info.structs):
+                # Inline struct init into array slot
+                struct = self.info.structs[arg.func.id]
+                provided = {}
+                for kw in arg.keywords:
+                    provided[kw.arg] = self._emit_expr(kw.value)
+                for field in struct.fields:
+                    if field.name in provided:
+                        self._line(
+                            f"{list_name}_items[{list_name}_count].{field.name} = "
+                            f"{provided[field.name]};"
+                        )
+                    elif field.default is not None:
+                        default_val = self._format_default(field.default, field.type)
+                        self._line(
+                            f"{list_name}_items[{list_name}_count].{field.name} = "
+                            f"{default_val};"
+                        )
+                self._line(f"{list_name}_count++;")
+            else:
+                val = self._emit_expr(arg)
+                self._line(f"{list_name}_items[{list_name}_count] = {val};")
+                self._line(f"{list_name}_count++;")
+            return
+
+        if method_name == "remove":
+            # Emit shift-down loop
+            arg = call.args[0]
+            val = self._emit_expr(arg)
+            # We need a temp index var; use _remove_idx
+            self._line("{")
+            self.indent += 1
+            self._line("LONG _ri;")
+            self._line(f"for (_ri = 0; _ri < {list_name}_count; _ri++) {{")
+            self.indent += 1
+            self._line(f"if (&{list_name}_items[_ri] == {val}) {{")
+            self.indent += 1
+            self._line("LONG _rj;")
+            self._line(f"for (_rj = _ri; _rj < {list_name}_count - 1; _rj++) {{")
+            self.indent += 1
+            self._line(f"{list_name}_items[_rj] = {list_name}_items[_rj + 1];")
+            self.indent -= 1
+            self._line("}")
+            self._line(f"{list_name}_count--;")
+            self._line("break;")
+            self.indent -= 1
+            self._line("}")
+            self.indent -= 1
+            self._line("}")
+            self.indent -= 1
+            self._line("}")
+            return
+
+        raise EmitError(f"unsupported list method '{method_name}'", lineno=call.lineno)
+
     def _emit_if(self, node: ast.If):
         cond = self._emit_expr(node.test)
         self._line(f"if ({cond}) {{")
@@ -456,10 +665,31 @@ class _Emitter:
         self._line("}")
 
     def _emit_for(self, node: ast.For):
-        """Emit `for i in range(...)` as a C for loop."""
+        """Emit for loops — range() or list iteration."""
         if not isinstance(node.target, ast.Name):
             raise EmitError("for loop target must be a name", lineno=node.lineno)
         var = node.target.id
+
+        # List iteration: for b in balls
+        if isinstance(node.iter, ast.Name):
+            list_name = node.iter.id
+            list_var = self._get_var_info(list_name)
+            if list_var and list_var.type == AmipyType.LIST:
+                idx = f"{var}_idx"
+                if list_var.list_element_type == AmipyType.STRUCT:
+                    self._line(f"for ({idx} = 0; {idx} < {list_name}_count; {idx}++) {{")
+                    self.indent += 1
+                    self._line(f"{var} = &{list_name}_items[{idx}];")
+                else:
+                    self._line(f"for ({idx} = 0; {idx} < {list_name}_count; {idx}++) {{")
+                    self.indent += 1
+                    self._line(f"{var} = {list_name}_items[{idx}];")
+                for stmt in node.body:
+                    self._emit_stmt(stmt)
+                self.indent -= 1
+                self._line("}")
+                return
+
         args = node.iter.args if isinstance(node.iter, ast.Call) else []
 
         if len(args) == 1:
@@ -501,6 +731,8 @@ class _Emitter:
             return self._emit_constant(node)
         if isinstance(node, ast.Name):
             return node.id
+        if isinstance(node, ast.Attribute):
+            return self._emit_field_target(node)
         if isinstance(node, ast.BinOp):
             return self._emit_binop(node)
         if isinstance(node, ast.UnaryOp):
@@ -660,6 +892,11 @@ class _Emitter:
                 if arg_type == AmipyType.FLOAT:
                     return f"(({arg}) < 0.0f ? -({arg}) : ({arg}))"
                 return f"(({arg}) < 0 ? -({arg}) : ({arg}))"
+            if name == "len":
+                arg = node.args[0]
+                if isinstance(arg, ast.Name):
+                    return f"{arg.id}_count"
+                raise EmitError("len() argument must be a variable", lineno=node.lineno)
             # Engine builtin as expression
             if name in BUILTINS and name in self.info.engine_imports:
                 builtin = BUILTINS[name]
@@ -717,6 +954,10 @@ class _Emitter:
         return f"{method.c_name}(&{obj_name})"
 
     def _get_var_info(self, name: str) -> VariableInfo | None:
+        # Check all local scopes then globals
+        for locals_dict in self.info.locals.values():
+            if name in locals_dict:
+                return locals_dict[name]
         if name in self.info.globals:
             return self.info.globals[name]
         return None

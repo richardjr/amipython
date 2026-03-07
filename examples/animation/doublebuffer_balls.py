@@ -6,8 +6,10 @@
 # Try increasing the ball count -- double buffering eliminates the flicker
 # that the single-buffer version (bouncing_blits.py) would show.
 
+from dataclasses import dataclass
 from amiga import Display, Shape, joy, rnd, run
 
+@dataclass
 class Ball:
     x: float
     y: float

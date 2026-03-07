@@ -5,8 +5,10 @@
 # parallax depth effect. Faster stars are brighter (higher colour register).
 # A simple but effective background effect for side-scrolling games.
 
+from dataclasses import dataclass
 from amiga import Display, Bitmap, palette, joy, rnd, vwait, run
 
+@dataclass
 class Star:
     speed: int
     x: int
