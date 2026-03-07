@@ -38,6 +38,7 @@ class EngineObjectType:
 class EngineModuleType:
     python_name: str
     functions: dict[str, EngineMethod]
+    properties: dict[str, EngineProperty] = field(default_factory=dict)
 
 
 @dataclass
@@ -46,6 +47,13 @@ class EngineStaticMethod:
     c_name: str
     params: list[EngineParam]
     return_type: AmipyType
+
+
+@dataclass
+class EngineProperty:
+    name: str
+    type: AmipyType
+    c_getter: str
 
 
 @dataclass
@@ -193,6 +201,22 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
             ),
         },
     ),
+    "mouse": EngineModuleType(
+        python_name="mouse",
+        functions={},
+        properties={
+            "x": EngineProperty(
+                name="x",
+                type=AmipyType.INT,
+                c_getter="amipython_mouse_x",
+            ),
+            "y": EngineProperty(
+                name="y",
+                type=AmipyType.INT,
+                c_getter="amipython_mouse_y",
+            ),
+        },
+    ),
     "joy": EngineModuleType(
         python_name="joy",
         functions={
@@ -227,4 +251,4 @@ BUILTINS: dict[str, EngineBuiltin] = {
     ),
 }
 
-ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table"}
+ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table", "mouse"}

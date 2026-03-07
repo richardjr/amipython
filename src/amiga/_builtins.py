@@ -57,6 +57,8 @@ def run(update_fn, *, until=None) -> None:
         if until is not None and until():
             break
         update_fn()
+        if backend._active_surface is not None:
+            backend.present(backend._active_surface)
         backend.wait_vblank()
 
 

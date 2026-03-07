@@ -59,6 +59,10 @@ def create_adf(
     xdftool = _find_xdftool()
     binary_name = binary.name
 
+    # Remove existing ADF — xdftool refuses to overwrite
+    if output.exists():
+        output.unlink()
+
     # Create a temporary startup-sequence
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", prefix="startup_", delete=False

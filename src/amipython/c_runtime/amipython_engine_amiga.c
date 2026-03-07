@@ -368,6 +368,16 @@ BOOL amipython_joy_button(LONG port) {
     (void)port;
 }
 
+LONG amipython_mouse_x(void) {
+    mouseProcess();
+    return (LONG)mouseGetX(MOUSE_PORT_1);
+}
+
+LONG amipython_mouse_y(void) {
+    mouseProcess();
+    return (LONG)mouseGetY(MOUSE_PORT_1);
+}
+
 LONG amipython_rnd(LONG n) {
     /* Simple LCG — adequate for games */
     static ULONG s_seed = 12345;
@@ -554,6 +564,16 @@ BOOL amipython_joy_button(LONG port) {
     amipython_print_long(port);
     amipython_print_str("\n");
     return TRUE;  /* Always TRUE so loops terminate in vamos */
+}
+
+LONG amipython_mouse_x(void) {
+    amipython_print_str("[input] mouse_x\n");
+    return 160;
+}
+
+LONG amipython_mouse_y(void) {
+    amipython_print_str("[input] mouse_y\n");
+    return 128;
 }
 
 void amipython_wait_mouse(void) {

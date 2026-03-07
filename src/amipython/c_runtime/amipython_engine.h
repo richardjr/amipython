@@ -93,6 +93,8 @@ BOOL amipython_joy_button(LONG port);
 void amipython_wait_mouse(void);
 void amipython_vwait(LONG n);
 LONG amipython_rnd(LONG n);
+LONG amipython_mouse_x(void);
+LONG amipython_mouse_y(void);
 void amipython_sin_table(float *out, LONG n);
 void amipython_cos_table(float *out, LONG n);
 

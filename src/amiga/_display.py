@@ -25,6 +25,7 @@ class Display:
         self._bm = bm
         backend = Backend.get()
         backend.ensure_init(self.width, self.height)
+        backend._active_surface = bm._surface
         backend.present(bm._surface)
 
     def blit(self, shape, x: int, y: int) -> None:

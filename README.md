@@ -215,8 +215,9 @@ amipython run --no-build game.py     # run existing binary in Amiberry
 
 # Floppy disk image
 amipython adf game.py                # build + create bootable 880KB ADF
-amipython adf game.py --no-boot      # data-only disk (not bootable)
-amipython adf game.py --label MyGame # custom volume label
+amipython adf --run game.py          # build + create ADF + boot in Amiberry
+amipython adf --no-boot game.py      # data-only disk (not bootable)
+amipython adf --label MyGame game.py # custom volume label
 
 # Setup
 amipython build-ace-image            # build the ACE Docker image (one-time)

@@ -95,7 +95,8 @@ def build_ace_image():
 @click.option("--no-build", is_flag=True, help="Skip build, package existing binary")
 @click.option("--no-boot", is_flag=True, help="Create data-only disk (not bootable)")
 @click.option("--label", type=str, default=None, help="Volume label (default: source stem)")
-def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label: str | None):
+@click.option("--run", is_flag=True, help="Launch ADF in Amiberry after creation")
+def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label: str | None, run: bool):
     """Build and package into a bootable ADF floppy image."""
     from amipython.adf import create_adf
 
@@ -137,6 +138,14 @@ def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label:
     except AmipythonError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+    if run:
+        from amipython.amiberry import launch_amiberry_adf
+        try:
+            launch_amiberry_adf(result)
+        except AmipythonError as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
 
 
 @main.command()

@@ -91,6 +91,16 @@ LONG amipython_rnd(LONG n) {
     return n > 0 ? (LONG)(rand() % n) : 0;
 }
 
+LONG amipython_mouse_x(void) {
+    printf("[input] mouse_x\n");
+    return 160;
+}
+
+LONG amipython_mouse_y(void) {
+    printf("[input] mouse_y\n");
+    return 128;
+}
+
 void amipython_sin_table(float *out, LONG n) {
     LONG i;
     printf("[math] sin_table %ld\n", n);

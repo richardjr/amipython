@@ -35,6 +35,7 @@ class Backend:
         self._running = True
         self._clock = None
         self._surfaces: weakref.WeakSet = weakref.WeakSet()
+        self._active_surface = None  # surface set by display.show()
 
     @classmethod
     def get(cls) -> Backend:

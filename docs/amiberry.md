@@ -11,13 +11,50 @@ amipython programs that use display/graphics (Phase 2+) need to run in a full Am
 ## Quick Start
 
 ```bash
-# Build and run in one step
+# Build and run in one step (mounts binary directory as hard drive)
 amipython run examples/basic/display1.py
 
 # Or build separately and then run
 amipython build examples/basic/display1.py
 amipython run --no-build examples/basic/display1.py
 ```
+
+## ADF Floppy Images
+
+Create bootable 880KB ADF floppy images for distribution or testing on real hardware:
+
+```bash
+# Build and create ADF
+amipython adf examples/animation/orbiting_ball.py
+
+# Build, create ADF, and immediately launch in Amiberry
+amipython adf --run examples/animation/orbiting_ball.py
+
+# Create ADF from existing binary (skip build)
+amipython adf --no-build examples/animation/orbiting_ball.py
+
+# Custom output path and volume label
+amipython adf -o my_game.adf --label "MyGame" examples/animation/orbiting_ball.py
+```
+
+The ADF contains:
+- `S/Startup-Sequence` — runs the game automatically on boot
+- `C/{binary_name}` — the compiled game executable
+
+### ADF Boot Requirements
+
+ADF boot uses the same **Kickstart 3.1 ROM** as `amipython run`. The `--run` flag launches Amiberry with the ADF inserted as DF0: and turbo floppy speed for instant loading.
+
+**Important:** ADF boot will not work with AROS or other alternative ROMs. ACE takes over the hardware directly and requires the real Amiga Kickstart 3.1.
+
+### Using ADFs Outside amipython
+
+To boot an ADF in Amiberry manually, configure:
+- **Kickstart**: 3.1 (rev 40.68) — not 3.2, not AROS
+- **DF0**: Point to the `.adf` file
+- **Floppy speed**: Turbo (800%) recommended for fast loading
+
+Or use the UAE config that `amipython adf --run` generates as a reference.
 
 ## Kickstart 3.1 Requirement
 
@@ -60,8 +97,15 @@ The generated `.uae` config sets up:
 - **Chip RAM**: 2MB
 - **Motherboard RAM**: 128MB (for development comfort)
 - **Display**: 720x568, SDL2, hardware rendering
+
+For `amipython run` (hard drive boot):
 - **Boot**: DH0 = minimal boot drive, DH1 = binary directory
 - **No floppies**, no Workbench
+
+For `amipython adf --run` (floppy boot):
+- **Boot**: DF0 = ADF floppy image
+- **Floppy speed**: 800% (turbo)
+- **No hard drives**
 
 ## OCS/ECS Only (No AGA)
 
@@ -93,3 +137,6 @@ Before using, edit the file to set your ROM path and directory paths.
 | Nothing visible | Drawing with color 0 (background) | Set palette colors and use non-zero color indices |
 | Amiberry not found | Not in PATH | Install Amiberry and ensure `amiberry` is on your PATH |
 | Mouse click doesn't exit | `wait_mouse()` waits for LMB | Click the left mouse button inside the emulator window |
+| ADF boots to AROS shell | Wrong ROM — using AROS instead of KS 3.1 | Use `amipython adf --run` which sets the correct ROM, or configure KS 3.1 manually |
+| ADF takes forever to boot | Floppy speed at 100% | Set floppy speed to 800% (turbo) in Amiberry config |
+| `xdftool not found` | amitools not installed | `pip install "git+https://github.com/cnvogelg/amitools.git@main#egg=amitools"` |

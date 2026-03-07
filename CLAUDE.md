@@ -125,8 +125,9 @@ amipython build game.py              # transpile + cross-compile via Docker
 amipython run game.py                # build + launch in Amiberry
 amipython run --no-build game.py     # run existing binary in Amiberry
 amipython adf game.py                # build + package into bootable game.adf
-amipython adf game.py --no-boot      # non-bootable data disk
-amipython adf game.py --label MyGame # custom volume label
+amipython adf --run game.py          # build + create ADF + boot in Amiberry
+amipython adf --no-boot game.py      # non-bootable data disk
+amipython adf --label MyGame game.py # custom volume label
 amipython build-ace-image            # build the ACE Docker image (one-time)
 pytest                               # all tests (excluding Docker)
 pytest -m docker                     # Docker cross-compilation tests only

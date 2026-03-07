@@ -843,13 +843,24 @@ class _TypeChecker(ast.NodeVisitor):
         return static.return_type
 
     def _infer_attribute(self, node: ast.Attribute) -> AmipyType:
-        """Infer type for attribute access (field access on structs)."""
+        """Infer type for attribute access (struct fields or module properties)."""
         if isinstance(node.value, ast.Name):
-            var = self._get_var(node.value.id, lineno=node.lineno)
+            name = node.value.id
+            var = self._get_var(name, lineno=node.lineno)
             if var and var.type == AmipyType.STRUCT and var.struct_name:
                 return self._resolve_field_type(node)
+            # Module property access (e.g. mouse.x, mouse.y)
+            if name in self.info.engine_modules:
+                from amipython.engine import MODULE_TYPES
+                mod = MODULE_TYPES[name]
+                if node.attr in mod.properties:
+                    return mod.properties[node.attr].type
+                raise TypeCheckError(
+                    f"module '{name}' has no property '{node.attr}'",
+                    lineno=node.lineno,
+                )
         raise TypeCheckError(
-            "attribute access is only supported on struct fields and in method calls",
+            "attribute access is only supported on struct fields, module properties, and method calls",
             lineno=node.lineno,
         )
 

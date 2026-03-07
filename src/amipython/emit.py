@@ -508,12 +508,21 @@ class _Emitter:
         return str(value)
 
     def _emit_field_target(self, node: ast.Attribute) -> str:
-        """Emit a field access target, using -> for refs and . for values."""
+        """Emit a field access target, using -> for refs and . for values.
+
+        Module properties (e.g. mouse.x) emit as C getter function calls.
+        """
         if not isinstance(node.value, ast.Name):
             raise EmitError("unsupported field target", lineno=node.lineno)
-        var = self._get_var_info(node.value.id)
+        name = node.value.id
+        # Module property access — emit as getter function call
+        if name in self.info.engine_modules:
+            mod = MODULE_TYPES[name]
+            if node.attr in mod.properties:
+                return f"{mod.properties[node.attr].c_getter}()"
+        var = self._get_var_info(name)
         accessor = "->" if (var and var.is_ref) else "."
-        return f"{node.value.id}{accessor}{node.attr}"
+        return f"{name}{accessor}{node.attr}"
 
     def _emit_subscript(self, node: ast.Subscript) -> str:
         """Emit list subscript access: list_var[idx] -> list_var_items[idx]."""
