@@ -1,7 +1,8 @@
-"""Engine builtin functions — wait_mouse, vwait, rnd, run."""
+"""Engine builtin functions — wait_mouse, vwait, rnd, run, sin_table, cos_table."""
 
 from __future__ import annotations
 
+import math
 import random
 
 try:
@@ -57,3 +58,25 @@ def run(update_fn, *, until=None) -> None:
             break
         update_fn()
         backend.wait_vblank()
+
+
+def sin_table(n: int, scale: int = 0) -> list:
+    """Return a list of n pre-computed sin values spanning 0 to 2*pi.
+
+    If scale is given, returns list[int] with values pre-multiplied by scale.
+    Otherwise returns list[float].
+    """
+    if scale:
+        return [int(math.sin(2.0 * math.pi * i / n) * scale) for i in range(n)]
+    return [math.sin(2.0 * math.pi * i / n) for i in range(n)]
+
+
+def cos_table(n: int, scale: int = 0) -> list:
+    """Return a list of n pre-computed cos values spanning 0 to 2*pi.
+
+    If scale is given, returns list[int] with values pre-multiplied by scale.
+    Otherwise returns list[float].
+    """
+    if scale:
+        return [int(math.cos(2.0 * math.pi * i / n) * scale) for i in range(n)]
+    return [math.cos(2.0 * math.pi * i / n) for i in range(n)]

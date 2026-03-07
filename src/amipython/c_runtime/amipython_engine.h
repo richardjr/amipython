@@ -83,6 +83,7 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm);
 void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y);
 void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp);
 void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, LONG color);
+void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
 void amipython_bitmap_clear(AmipyBitmap *bm);
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color);
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
@@ -90,7 +91,9 @@ void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b);
 void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b);
 BOOL amipython_joy_button(LONG port);
 void amipython_wait_mouse(void);
-void amipython_vwait(void);
+void amipython_vwait(LONG n);
 LONG amipython_rnd(LONG n);
+void amipython_sin_table(float *out, LONG n);
+void amipython_cos_table(float *out, LONG n);
 
 #endif /* AMIPYTHON_ENGINE_H */

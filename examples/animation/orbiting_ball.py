@@ -3,45 +3,41 @@
 #           Original by V. A. Hill (NZ Amiga Mag)
 #
 # A ball shape orbits in a circular path using pre-computed sin/cos
-# tables. The orbit phase advances each frame, cycling through 8
-# bitmap pages for smooth animation. Adapted to a simpler single-shape
-# orbit to fit the amipython model.
+# lookup tables. Uses single-buffer with manual clear for simplicity.
 
-from amiga import Display, Bitmap, Shape, palette, joy, run, sin_table, cos_table, wrap
+from amiga import Display, Bitmap, Shape, palette, joy, run, sin_table, cos_table
 
-display = Display(320, 256, bitplanes=2, double_buffer=True)
+display = Display(320, 200, bitplanes=3)
 
-# Set up a simple 4-colour palette
 palette.set(0, 0, 0, 0)
-palette.set(1, 15, 9, 9)
-palette.set(2, 10, 0, 0)
-palette.set(3, 12, 0, 0)
+palette.set(1, 15, 0, 0)
 
-# Create a small ball shape by drawing on a temporary bitmap
-tmp = Bitmap(24, 32, bitplanes=2)
-tmp.circle_filled(12, 20, 11, 3)
-tmp.circle(12, 20, 11, 2)
-tmp.circle(12, 20, 10, 2)
-ball = Shape.grab(tmp, 0, 9, 24, 32)
-ball.set_origin("center")
+# Screen bitmap — also used to draw the ball shape before grab
+bm = Bitmap(320, 200, bitplanes=3)
+bm.circle_filled(8, 8, 7, 1)
+ball = Shape.grab(bm, 0, 0, 16, 16)
+bm.clear()
 
-# Pre-compute orbit path (720 entries for sub-degree precision)
-ORBIT_RADIUS = 110
-orbit_x = cos_table(720)
-orbit_y = sin_table(720)
+# Pre-compute orbit path as integer offsets (no runtime float math)
+orbit_x = cos_table(720, 80)
+orbit_y = sin_table(720, 80)
 
-r = 0
+r: int = 0
+
+display.show(bm)
 
 def update():
     global r
 
+    bm.clear()
+
     # Calculate ball position on circular orbit
-    idx = int(r) % 720
-    x = 160 + int(orbit_x[idx] * ORBIT_RADIUS)
-    y = 128 + int(orbit_y[idx] * ORBIT_RADIUS)
+    idx: int = r % 720
+    x: int = 148 + orbit_x[idx]
+    y: int = 88 + orbit_y[idx]
 
     display.blit(ball, x, y)
 
-    r = wrap(r + 3, 0, 720)
+    r = (r + 3) % 720
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

@@ -7,7 +7,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "amipython_engine.h"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static int s_joy_button_count = 0;
 
@@ -36,6 +41,11 @@ void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
 
 void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, LONG color) {
     printf("[bitmap] circle_filled %ld,%ld r=%ld color=%ld\n", cx, cy, r, color);
+}
+
+void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color) {
+    printf("[bitmap] box_filled %ld,%ld-%ld,%ld color=%ld\n", x1, y1, x2, y2, color);
+    (void)bm;
 }
 
 void amipython_bitmap_clear(AmipyBitmap *bm) {
@@ -72,11 +82,27 @@ void amipython_wait_mouse(void) {
     printf("[input] wait_mouse\n");
 }
 
-void amipython_vwait(void) {
-    printf("[input] vwait\n");
+void amipython_vwait(LONG n) {
+    printf("[input] vwait %ld\n", n);
 }
 
 LONG amipython_rnd(LONG n) {
     printf("[rnd] %ld\n", n);
     return n > 0 ? (LONG)(rand() % n) : 0;
+}
+
+void amipython_sin_table(float *out, LONG n) {
+    LONG i;
+    printf("[math] sin_table %ld\n", n);
+    for (i = 0; i < n; i++) {
+        out[i] = (float)sin(2.0 * M_PI * (double)i / (double)n);
+    }
+}
+
+void amipython_cos_table(float *out, LONG n) {
+    LONG i;
+    printf("[math] cos_table %ld\n", n);
+    for (i = 0; i < n; i++) {
+        out[i] = (float)cos(2.0 * M_PI * (double)i / (double)n);
+    }
 }

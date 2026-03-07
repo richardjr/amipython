@@ -187,7 +187,7 @@ amipython scripts are valid Python — they run directly with `python game.py` u
 | **Functions** | Annotated params/return, recursion, `global` |
 | **Control flow** | `if`/`elif`/`else`, `while`, `for`/`range()`, `break`, `continue` |
 | **Builtins** | `print()`, `range()`, `int()`, `float()`, `abs()`, `len()` |
-| **Engine** | `Display`, `Bitmap`, `Shape`, `palette`, `joy`, `run()`, `vwait()`, `rnd()` |
+| **Engine** | `Display`, `Bitmap`, `Shape`, `palette`, `joy`, `run()`, `vwait(n)`, `rnd()`, `sin_table()`, `cos_table()` |
 
 See [Language Subset](docs/language.md) for the full reference including type mapping, arithmetic semantics, and what's deliberately excluded.
 
@@ -198,7 +198,7 @@ See [Language Subset](docs/language.md) for the full reference including type ma
 | **1. Transpiler Core** | Done | `int`, `float`, `bool`, `str`, functions, control flow, `print()`, arithmetic with Python semantics |
 | **2. Display + Drawing** | Done | `Display`, `Bitmap`, palette, `circle_filled`, `plot`, `clear`, `wait_mouse()`. OCS/ECS (max 5 bitplanes / 32 colours) |
 | **3. Game Loop + Sprites/Bobs** | Done | `run()`, double buffering, `Shape.grab()`, `display.blit()`, `joy.button()`, `rnd()` |
-| **4. Classes + Lists** | Done | `@dataclass` structs, `list[T]`, field access/mutation, list iteration, `len()`, `append()`, `remove()` |
+| **4. Classes + Lists** | Done | `@dataclass` structs, `list[T]`, field access/mutation, list iteration/subscript, `len()`, `append()`, `remove()`, `sin_table()`, `cos_table()`, `box_filled()`, ADF floppy output |
 | **5. Copper, Collision, Audio** | Planned | Per-scanline effects, hardware collision, dual playfield, Paula sound |
 
 ## Commands

@@ -112,6 +112,18 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "box_filled": EngineMethod(
+                name="box_filled",
+                c_name="amipython_bitmap_box_filled",
+                params=[
+                    EngineParam("x1", AmipyType.INT),
+                    EngineParam("y1", AmipyType.INT),
+                    EngineParam("x2", AmipyType.INT),
+                    EngineParam("y2", AmipyType.INT),
+                    EngineParam("color", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
             "clear": EngineMethod(
                 name="clear",
                 c_name="amipython_bitmap_clear",
@@ -204,7 +216,7 @@ BUILTINS: dict[str, EngineBuiltin] = {
     "vwait": EngineBuiltin(
         python_name="vwait",
         c_name="amipython_vwait",
-        params=[],
+        params=[EngineParam("n", AmipyType.INT)],
         return_type=AmipyType.VOID,
     ),
     "rnd": EngineBuiltin(
@@ -215,4 +227,4 @@ BUILTINS: dict[str, EngineBuiltin] = {
     ),
 }
 
-ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run"}
+ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table"}

@@ -2,6 +2,45 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2025-03-07: Orbiting ball invisible — three blitter issues
+
+**Problem:** The orbiting ball animation (pre-computed sin/cos trig tables, integer math, clear+blit per frame) ran without crashing but showed a completely black screen. The bouncing ball example worked fine with the same C runtime.
+
+**Root cause (three issues found via systematic isolation):**
+
+1. **Shape width must be word-aligned.** The Amiga blitter operates on 16-bit words. A shape created with non-aligned width (e.g., 24 pixels) silently produced garbage or invisible blits. The bouncing ball used 16×16 (already aligned), so it worked.
+
+2. **`blitCopy` from small source bitmap fails with `MINTERM_COOKIE`.** Grabbing a shape from a small temporary bitmap (e.g., `Bitmap(24, 24)`) via `blitCopy` produced empty shape data — the circle pixels weren't copied. Drawing on the main display bitmap `bm` and grabbing from there worked correctly.
+
+3. **`shape_grab` missing `blitWait()`.** The `blitCopy` in `shape_grab` ran immediately after `circle_filled` scanline blits without waiting for the blitter to finish, potentially reading incomplete data.
+
+**Diagnosis approach:** Created increasingly minimal test programs, comparing each variable against the working bouncing ball. The breakthrough was adding a blue background (`palette.set(0, 0, 0, 15)`) to make the display visible — this revealed the ball was being drawn as a *black* circle (empty shape data), not missing entirely. Testing with 16×16 vs 24×24 shapes confirmed the alignment issue. Testing `tmp` bitmap vs `bm` bitmap confirmed the small-source-bitmap issue.
+
+**Fixes:**
+
+1. `shape_grab()` rounds width to next 16-pixel boundary:
+   ```c
+   UWORD uw = (UWORD)((w + 15) & ~15);
+   ```
+
+2. Updated orbiting ball example to draw on `bm` (the display bitmap) and grab from there, matching the proven bouncing ball pattern:
+   ```python
+   bm = Bitmap(320, 200, bitplanes=3)
+   bm.circle_filled(8, 8, 7, 1)
+   ball = Shape.grab(bm, 0, 0, 16, 16)
+   bm.clear()
+   ```
+
+3. Added `blitWait()` before the `blitCopy` in `shape_grab()`.
+
+4. Added `_dirtyExpand()` call in `display_blit()` so dirty rect tracking works for blit operations, not just drawing primitives. Requires a forward declaration since `_dirtyExpand` is defined later in the file.
+
+**Files changed:** `amipython_engine_amiga.c` (shape_grab alignment + blitWait, display_blit dirty tracking), `examples/animation/orbiting_ball.py` (use display bitmap for shape drawing).
+
+**Lesson:** On the Amiga blitter, always use 16-pixel-aligned widths. When debugging invisible graphics, add a contrasting background colour to distinguish "not drawing" from "drawing in colour 0".
+
+---
+
 ## 2025-03-07: Display tearing at top of screen
 
 **Problem:** The bouncing ball animation showed visual artifacts at the top of the screen — the ball would disappear and horizontal lines were visible when it moved near y=0.

@@ -282,6 +282,46 @@ class _TypeChecker(ast.NodeVisitor):
                         target.id, AmipyType.STRUCT, lineno=node.lineno,
                         struct_name=struct_name,
                     )
+                # Trig table assignment: var = sin_table(n) / cos_table(n, scale)
+                elif (isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Name)
+                        and node.value.func.id in ("sin_table", "cos_table")
+                        and val_type == AmipyType.LIST):
+                    capacity = 64
+                    init_values = None
+                    func_name = node.value.func.id
+                    args = node.value.args
+                    # Determine if scaled (2 args) or unscaled (1 arg)
+                    has_scale = (len(args) == 2
+                                 and isinstance(args[1], ast.Constant)
+                                 and isinstance(args[1].value, int))
+                    elem_type = AmipyType.INT if has_scale else AmipyType.FLOAT
+                    if (args
+                            and isinstance(args[0], ast.Constant)
+                            and isinstance(args[0].value, int)):
+                        import math
+                        capacity = args[0].value
+                        n = capacity
+                        if has_scale:
+                            scale = args[1].value
+                            if func_name == "sin_table":
+                                init_values = [int(math.sin(2.0 * math.pi * i / n) * scale) for i in range(n)]
+                            else:
+                                init_values = [int(math.cos(2.0 * math.pi * i / n) * scale) for i in range(n)]
+                        else:
+                            if func_name == "sin_table":
+                                init_values = [math.sin(2.0 * math.pi * i / n) for i in range(n)]
+                            else:
+                                init_values = [math.cos(2.0 * math.pi * i / n) for i in range(n)]
+                    self._set_var(
+                        target.id, AmipyType.LIST, lineno=node.lineno,
+                        list_element_type=elem_type,
+                    )
+                    # Update capacity and init values on the variable after creation
+                    var = self._get_var(target.id)
+                    if var:
+                        var.list_capacity = capacity
+                        var.list_init_values = init_values
                 else:
                     self._set_var(target.id, val_type, lineno=node.lineno)
             elif isinstance(target, ast.Attribute):
@@ -433,6 +473,9 @@ class _TypeChecker(ast.NodeVisitor):
         if isinstance(node, ast.Attribute):
             return self._infer_attribute(node)
 
+        if isinstance(node, ast.Subscript):
+            return self._infer_subscript(node)
+
         if isinstance(node, ast.List):
             # Empty list literal — type comes from annotation context
             if len(node.elts) == 0:
@@ -490,6 +533,15 @@ class _TypeChecker(ast.NodeVisitor):
             # run(update, until=expr) — special game loop builtin
             if name == "run" and name in self.info.engine_imports:
                 return self._infer_run_call(node)
+            # Trig table builtins: sin_table(n), cos_table(n, scale) -> list
+            if name in ("sin_table", "cos_table") and name in self.info.engine_imports:
+                if len(node.args) not in (1, 2):
+                    raise TypeCheckError(
+                        f"'{name}()' expects 1 or 2 arguments", lineno=node.lineno
+                    )
+                for arg in node.args:
+                    self._infer(arg)
+                return AmipyType.LIST
             # Engine builtin: wait_mouse(), vwait(), rnd()
             if name in BUILTINS and name in self.info.engine_imports:
                 builtin = BUILTINS[name]
@@ -798,6 +850,19 @@ class _TypeChecker(ast.NodeVisitor):
                 return self._resolve_field_type(node)
         raise TypeCheckError(
             "attribute access is only supported on struct fields and in method calls",
+            lineno=node.lineno,
+        )
+
+    def _infer_subscript(self, node: ast.Subscript) -> AmipyType:
+        """Infer type for subscript access (list[idx])."""
+        if isinstance(node.value, ast.Name):
+            var = self._get_var(node.value.id, lineno=node.lineno)
+            if var and var.type == AmipyType.LIST:
+                self._infer(node.slice)
+                elem_type = var.list_element_type or AmipyType.INT
+                return elem_type
+        raise TypeCheckError(
+            "subscript access is only supported on list variables",
             lineno=node.lineno,
         )
 

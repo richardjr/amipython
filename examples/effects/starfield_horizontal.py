@@ -52,4 +52,4 @@ def update():
 
     vwait(3)
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

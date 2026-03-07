@@ -289,7 +289,7 @@ class TestEmitPhase3:
         )
         assert "while (!(amipython_joy_button(0)))" in c
         assert "update();" in c
-        assert "amipython_vwait();" in c
+        assert "amipython_vwait(1);" in c
 
     def test_shape_variable_declaration(self):
         c = _emit(

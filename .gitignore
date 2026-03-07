@@ -21,6 +21,12 @@ examples/basic/display1
 examples/basic/minimal_display
 examples/animation/bounce_int
 examples/animation/bouncing_ball
+examples/animation/bouncing_blits
+examples/animation/orbiting_ball
+examples/hello
+
+# ADF floppy images
+*.adf
 
 # Amiberry boot dir — only S/Startup-Sequence is source
 amiberry_boot/*

@@ -18,7 +18,7 @@ from amiga._bitmap import Bitmap
 from amiga._shape import Shape
 from amiga._palette import palette
 from amiga._joy import joy
-from amiga._builtins import wait_mouse, vwait, rnd, run
+from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table
 
 __all__ = [
     "Display",
@@ -30,4 +30,6 @@ __all__ = [
     "vwait",
     "rnd",
     "run",
+    "sin_table",
+    "cos_table",
 ]

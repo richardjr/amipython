@@ -75,6 +75,8 @@ class VariableInfo:
     list_element_type: AmipyType | None = None  # when type == LIST
     list_element_struct: str | None = None  # when LIST of STRUCT
     is_ref: bool = False  # True for loop vars over lists (emitted as pointers)
+    list_capacity: int = 64  # max elements for list arrays
+    list_init_values: list | None = None  # pre-computed values for trig tables
 
 
 @dataclass

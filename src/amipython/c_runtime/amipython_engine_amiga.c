@@ -106,9 +106,9 @@ static void _flushPendingPalette(AmipyDisplay *d) {
     }
 }
 
+static void _dirtyExpand(AmipyBitmap *bm, WORD x1, WORD y1, WORD x2, WORD y2);
+
 void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
-    /* Blit the shape's bitmap onto the user bitmap (linked via show()).
-     * The vwait() call will copy the user bitmap to the display. */
     if (s_pActiveBitmap && s_pActiveBitmap->pBitmap && shape->pBitmap) {
         blitWait();
         blitCopy(
@@ -117,6 +117,9 @@ void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) 
             shape->width, shape->height,
             MINTERM_COOKIE
         );
+        _dirtyExpand(s_pActiveBitmap, (WORD)x, (WORD)y,
+                     (WORD)(x + (LONG)shape->width - 1),
+                     (WORD)(y + (LONG)shape->height - 1));
     }
     (void)d;
 }
@@ -244,6 +247,16 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
     }
 }
 
+void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color) {
+    if (bm->pBitmap && x1 <= x2 && y1 <= y2) {
+        UWORD bw = (UWORD)(x2 - x1 + 1);
+        UWORD bh = (UWORD)(y2 - y1 + 1);
+        _dirtyExpand(bm, (WORD)x1, (WORD)y1, (WORD)x2, (WORD)y2);
+        blitWait();
+        blitRect(bm->pBitmap, (UWORD)x1, (UWORD)y1, bw, bh, (UBYTE)color);
+    }
+}
+
 void amipython_bitmap_clear(AmipyBitmap *bm) {
     if (bm->pBitmap) {
         blitWait();
@@ -313,25 +326,31 @@ void amipython_wait_mouse(void) {
     }
 }
 
-void amipython_vwait(void) {
+void amipython_vwait(LONG n) {
+    LONG i;
     if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-        blitWait();
-        vPortWaitForEnd(s_pActiveDisplay->pVPort);
-        copProcessBlocks();
+        for (i = 0; i < n; i++) {
+            blitWait();
+            vPortWaitForEnd(s_pActiveDisplay->pVPort);
+            copProcessBlocks();
+        }
     }
 }
 
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
-    /* Create a new bitmap and copy the region from the source */
-    shape->width = (UWORD)w;
-    shape->height = (UWORD)h;
+    /* Round width up to next multiple of 16 — blitter operates on words */
+    UWORD uw = (UWORD)((w + 15) & ~15);
+    UWORD uh = (UWORD)h;
+    shape->width = uw;
+    shape->height = uh;
     shape->bitplanes = bm->bitplanes;
-    shape->pBitmap = bitmapCreate((UWORD)w, (UWORD)h, bm->bitplanes, BMF_CLEAR);
+    shape->pBitmap = bitmapCreate(uw, uh, bm->bitplanes, BMF_CLEAR);
     if (shape->pBitmap && bm->pBitmap) {
+        blitWait();
         blitCopy(
             bm->pBitmap, (WORD)x, (WORD)y,
             shape->pBitmap, 0, 0,
-            (UWORD)w, (UWORD)h,
+            uw, uh,
             MINTERM_COOKIE
         );
     }
@@ -355,6 +374,38 @@ LONG amipython_rnd(LONG n) {
     if (n <= 0) return 0;
     s_seed = s_seed * 1103515245UL + 12345;
     return (LONG)((s_seed >> 16) % (ULONG)n);
+}
+
+static float _sin_approx(float x) {
+    /* Taylor series sin(x) — 5 terms, adequate for lookup tables.
+     * Normalize x to [-pi, pi] range first. */
+    float x2, x3, x5, x7;
+    float pi = 3.14159265f;
+    /* Reduce to [-pi, pi] */
+    while (x > pi) x -= 2.0f * pi;
+    while (x < -pi) x += 2.0f * pi;
+    x2 = x * x;
+    x3 = x2 * x;
+    x5 = x3 * x2;
+    x7 = x5 * x2;
+    return x - x3 / 6.0f + x5 / 120.0f - x7 / 5040.0f;
+}
+
+void amipython_sin_table(float *out, LONG n) {
+    LONG i;
+    float step = 6.28318530f / (float)n;  /* 2*pi / n */
+    for (i = 0; i < n; i++) {
+        out[i] = _sin_approx((float)i * step);
+    }
+}
+
+void amipython_cos_table(float *out, LONG n) {
+    LONG i;
+    float step = 6.28318530f / (float)n;
+    float half_pi = 1.57079632f;
+    for (i = 0; i < n; i++) {
+        out[i] = _sin_approx((float)i * step + half_pi);
+    }
 }
 
 #else
@@ -429,6 +480,21 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
     amipython_print_str("\n");
 }
 
+void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color) {
+    amipython_print_str("[bitmap] box_filled ");
+    amipython_print_long(x1);
+    amipython_print_str(",");
+    amipython_print_long(y1);
+    amipython_print_str("-");
+    amipython_print_long(x2);
+    amipython_print_str(",");
+    amipython_print_long(y2);
+    amipython_print_str(" color=");
+    amipython_print_long(color);
+    amipython_print_str("\n");
+    (void)bm;
+}
+
 void amipython_bitmap_clear(AmipyBitmap *bm) {
     amipython_print_str("[bitmap] clear ");
     _print_uword(bm->width);
@@ -494,8 +560,10 @@ void amipython_wait_mouse(void) {
     amipython_print_str("[input] wait_mouse\n");
 }
 
-void amipython_vwait(void) {
-    amipython_print_str("[input] vwait\n");
+void amipython_vwait(LONG n) {
+    amipython_print_str("[input] vwait ");
+    amipython_print_long(n);
+    amipython_print_str("\n");
 }
 
 LONG amipython_rnd(LONG n) {
@@ -504,6 +572,20 @@ LONG amipython_rnd(LONG n) {
     if (n <= 0) return 0;
     s_seed = s_seed * 1103515245UL + 12345;
     return (LONG)((s_seed >> 16) % (ULONG)n);
+}
+
+void amipython_sin_table(float *out, LONG n) {
+    amipython_print_str("[math] sin_table ");
+    amipython_print_long(n);
+    amipython_print_str("\n");
+    (void)out;
+}
+
+void amipython_cos_table(float *out, LONG n) {
+    amipython_print_str("[math] cos_table ");
+    amipython_print_long(n);
+    amipython_print_str("\n");
+    (void)out;
 }
 
 #endif /* ACE_ENGINE */

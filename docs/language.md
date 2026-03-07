@@ -130,8 +130,9 @@ n = balls_count;
 
 List rules:
 - Element type can be `int`, `float`, `bool`, or a `@dataclass` struct
-- Maximum 64 elements per list
+- Maximum 64 elements per list (trig tables can be larger)
 - `for item in list:` gives a pointer for struct lists (mutations persist)
+- `list[idx]` for element access by index
 - `.append(item)` and `.remove(item)` supported
 - `len(list)` returns current count
 
@@ -182,6 +183,35 @@ amipython_display_init(&display, 320, 256, 5);
 amipython_bitmap_init(&bm, 320, 256, 5);
 ```
 
+### Drawing Methods
+
+`Bitmap` objects support these drawing primitives:
+
+```python
+bm.circle_filled(cx, cy, r, color)     # filled circle
+bm.box_filled(x1, y1, x2, y2, color)   # filled rectangle
+bm.plot(x, y, color)                    # single pixel
+bm.clear()                              # fill with colour 0
+```
+
+### Shapes (Blittable Graphics)
+
+Shapes are rectangular graphics grabbed from a bitmap and blitted onto the display:
+
+```python
+bm.circle_filled(8, 8, 7, 1)           # draw on the display bitmap
+ball = Shape.grab(bm, 0, 0, 16, 16)    # grab the region as a shape
+bm.clear()                              # clear the source drawing
+
+display.blit(ball, x, y)               # blit the shape at runtime
+```
+
+Shape rules:
+- Draw the shape on the **display bitmap** (`bm`), not a separate small bitmap
+- Shape width is automatically rounded up to a multiple of 16 (blitter word alignment)
+- Use `display.blit(shape, x, y)` to draw — coordinates must keep the shape within screen bounds
+- No direct constructor — shapes are created only via `Shape.grab()`
+
 ### Engine Modules
 
 Singleton modules like `palette` are called directly:
@@ -196,8 +226,43 @@ palette.set(0, 15, 0, 0)      # direct OCS 4-bit values
 Top-level functions from the engine:
 
 ```python
-wait_mouse()    # wait for left mouse button click
-vwait()         # wait for vertical blank
+wait_mouse()            # wait for left mouse button click
+vwait(1)                # wait for 1 vertical blank (1/50th second)
+vwait(3)                # wait for 3 vertical blanks (slower animation)
+rnd(100)                # random integer 0-99
+sin_table(720)          # list of 720 pre-computed sin values (0 to 2*pi)
+cos_table(720)          # list of 720 pre-computed cos values (0 to 2*pi)
+sin_table(720, 80)      # list of 720 pre-computed int(sin * 80) values
+cos_table(720, 80)      # list of 720 pre-computed int(cos * 80) values
+```
+
+### Lookup Tables
+
+Pre-computed trig tables for fast angle calculations — essential for smooth animation on 7MHz 68000:
+
+```python
+from amiga import sin_table, cos_table
+
+# Integer-scaled tables (recommended for game loops — pure integer math)
+orbit_x = cos_table(720, 80)    # list[int], 720 entries pre-scaled by 80
+orbit_y = sin_table(720, 80)
+
+x = 160 + orbit_x[idx]          # integer add only
+y = 128 + orbit_y[idx]
+
+# Float tables (for static calculations only)
+orbit_x = cos_table(720)        # list[float], 720 entries
+x = 160 + int(orbit_x[idx] * radius)
+```
+
+All table values are computed at transpile time in Python and embedded as initialized C arrays — zero runtime float math on the Amiga.
+
+This maps to C:
+```c
+LONG orbit_x_items[720] = {80, 79, 79, ...};  /* pre-computed */
+LONG orbit_x_count = 720;
+
+x = 160 + orbit_x_items[idx];
 ```
 
 ## Not Supported (by design)

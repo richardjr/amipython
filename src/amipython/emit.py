@@ -1,6 +1,7 @@
 """C89 code emitter for the amipython transpiler."""
 
 import ast
+import math
 
 from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import EmitError
@@ -167,8 +168,29 @@ class _Emitter:
             elem_c = var.list_element_struct
         else:
             elem_c = C_TYPE_MAP.get(var.list_element_type, "LONG")
-        self._line(f"{elem_c} {name}_items[64];")
-        self._line(f"LONG {name}_count = 0;")
+        capacity = var.list_capacity
+        if var.list_init_values is not None:
+            # Pre-computed values — emit as initialized array
+            self._line(f"{elem_c} {name}_items[{capacity}] = {{")
+            self.indent += 1
+            chunk_size = 8
+            values = var.list_init_values
+            is_float = var.list_element_type == AmipyType.FLOAT
+            for i in range(0, len(values), chunk_size):
+                chunk = values[i:i + chunk_size]
+                if is_float:
+                    line = ", ".join(f"{v:.8f}f" for v in chunk)
+                else:
+                    line = ", ".join(str(v) for v in chunk)
+                if i + chunk_size < len(values):
+                    line += ","
+                self._line(line)
+            self.indent -= 1
+            self._line("};")
+            self._line(f"LONG {name}_count = {len(values)};")
+        else:
+            self._line(f"{elem_c} {name}_items[{capacity}];")
+            self._line(f"LONG {name}_count = 0;")
 
     def _emit_var_decl_for_local(self, name: str, var: VariableInfo):
         """Emit a local variable declaration, handling structs, lists, and refs."""
@@ -341,6 +363,23 @@ class _Emitter:
                     and node.value.func.id in self.info.structs):
                 self._emit_struct_init(target.id, node.value)
                 return
+            # Trig table: orbit_x = cos_table(720)
+            # Values pre-computed at transpile time — array already initialized at declaration
+            if (isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in ("sin_table", "cos_table")):
+                var = self._get_var_info(target.id)
+                if var and var.list_init_values is not None:
+                    # Already initialized at declaration — nothing to emit
+                    pass
+                else:
+                    # Fallback to runtime call for non-literal args
+                    func_name = node.value.func.id
+                    c_name = f"amipython_{func_name}"
+                    arg = self._emit_expr(node.value.args[0])
+                    self._line(f"{c_name}({target.id}_items, {arg});")
+                    self._line(f"{target.id}_count = {arg};")
+                return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")
         elif isinstance(target, ast.Attribute):
@@ -475,6 +514,13 @@ class _Emitter:
         var = self._get_var_info(node.value.id)
         accessor = "->" if (var and var.is_ref) else "."
         return f"{node.value.id}{accessor}{node.attr}"
+
+    def _emit_subscript(self, node: ast.Subscript) -> str:
+        """Emit list subscript access: list_var[idx] -> list_var_items[idx]."""
+        if isinstance(node.value, ast.Name):
+            idx = self._emit_expr(node.slice)
+            return f"{node.value.id}_items[{idx}]"
+        raise EmitError("unsupported subscript target", lineno=node.lineno)
 
     def _emit_engine_init(self, var_name: str, call: ast.Call):
         """Emit engine constructor as init call: amipython_display_init(&d, ...)."""
@@ -743,6 +789,8 @@ class _Emitter:
             return self._emit_compare(node)
         if isinstance(node, ast.Call):
             return self._emit_call(node)
+        if isinstance(node, ast.Subscript):
+            return self._emit_subscript(node)
         raise EmitError(
             f"unsupported expression: {type(node).__name__}",
             lineno=getattr(node, "lineno", None),
@@ -975,7 +1023,7 @@ class _Emitter:
                 until_expr = self._emit_expr(kw.value.body)
         self._line(f"while (!({until_expr})) {{")
         self.indent += 1
-        self._line("amipython_vwait();")
+        self._line("amipython_vwait(1);")
         self._line(f"{func_name}();")
         self.indent -= 1
         self._line("}")

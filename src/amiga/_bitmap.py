@@ -39,6 +39,11 @@ class Bitmap:
         if 0 <= x < self.width and 0 <= y < self.height:
             self._surface.set_at((x, y), color)
 
+    def box_filled(self, x1: int, y1: int, x2: int, y2: int, color: int) -> None:
+        """Draw a filled rectangle from (x1,y1) to (x2,y2) using colour index."""
+        rect = pygame.Rect(x1, y1, x2 - x1 + 1, y2 - y1 + 1)
+        self._surface.fill(color, rect)
+
     def clear(self) -> None:
         """Fill the entire surface with colour index 0."""
         self._surface.fill(0)
