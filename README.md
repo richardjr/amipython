@@ -148,3 +148,4 @@ amipython build-ace-image            # build the ACE Docker image (one-time)
 | [Blitz Comparison](docs/blitz-comparison.md) | 12 side-by-side Blitz Basic → amipython examples, full API coverage tables |
 | [Running in Amiberry](docs/amiberry.md) | Emulator setup, Kickstart 3.1 requirement, troubleshooting |
 | [Architecture](docs/architecture.md) | Build system, cross-compilation, design decisions, prior art |
+| [Dev Log](docs/devlog.md) | Technical notes — problems hit, root causes, and solutions |

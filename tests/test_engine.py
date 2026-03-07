@@ -152,3 +152,149 @@ class TestEmitEngine:
         decl_lines = [l for l in lines if l.strip().endswith(";") and "palette" in l
                       and "amipython_palette" not in l]
         assert decl_lines == []
+
+
+class TestValidatePhase3:
+    def test_shape_import_accepted(self):
+        assert _validate("from amiga import Shape") == []
+
+    def test_joy_import_accepted(self):
+        assert _validate("from amiga import joy") == []
+
+    def test_rnd_import_accepted(self):
+        assert _validate("from amiga import rnd") == []
+
+    def test_run_import_accepted(self):
+        assert _validate("from amiga import run") == []
+
+    def test_run_with_until_kwarg_accepted(self):
+        src = (
+            "from amiga import run, joy\n"
+            "def update():\n"
+            "    pass\n"
+            "run(update, until=lambda: joy.button(0))"
+        )
+        assert _validate(src) == []
+
+
+class TestTypecheckPhase3:
+    def test_shape_grab_type(self):
+        info = _typecheck(
+            "from amiga import Bitmap, Shape\n"
+            "bm = Bitmap(16, 16)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)"
+        )
+        assert info.globals["s"].type == AmipyType.SHAPE
+
+    def test_shape_grab_wrong_args(self):
+        with pytest.raises(TypeCheckError, match="expects 5"):
+            _typecheck(
+                "from amiga import Bitmap, Shape\n"
+                "bm = Bitmap(16, 16)\n"
+                "s = Shape.grab(bm, 0, 0)"
+            )
+
+    def test_shape_unknown_static_method(self):
+        with pytest.raises(TypeCheckError, match="has no static method"):
+            _typecheck(
+                "from amiga import Shape\n"
+                "s = Shape.foo()"
+            )
+
+    def test_rnd_type(self):
+        info = _typecheck("from amiga import rnd\nx = rnd(10)")
+        assert info.globals["x"].type == AmipyType.INT
+
+    def test_joy_button_type(self):
+        info = _typecheck("from amiga import joy\nx = joy.button(0)")
+        assert info.globals["x"].type == AmipyType.BOOL
+
+    def test_display_blit_type(self):
+        _typecheck(
+            "from amiga import Display, Bitmap, Shape\n"
+            "d = Display(320, 200)\n"
+            "bm = Bitmap(16, 16)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)\n"
+            "d.blit(s, 10, 20)"
+        )
+
+    def test_run_typecheck(self):
+        _typecheck(
+            "from amiga import run, joy\n"
+            "def update():\n"
+            "    pass\n"
+            "run(update, until=lambda: joy.button(0))"
+        )
+
+    def test_run_requires_lambda(self):
+        with pytest.raises(TypeCheckError, match="must use a lambda"):
+            _typecheck(
+                "from amiga import run, joy\n"
+                "def update():\n"
+                "    pass\n"
+                "run(update, until=joy.button(0))"
+            )
+
+    def test_run_requires_until(self):
+        with pytest.raises(TypeCheckError, match="requires 'until='"):
+            _typecheck(
+                "from amiga import run\n"
+                "def update():\n"
+                "    pass\n"
+                "run(update)"
+            )
+
+    def test_run_requires_function_name(self):
+        with pytest.raises(TypeCheckError, match="must be a function name"):
+            _typecheck(
+                "from amiga import run, joy\n"
+                "run(42, until=lambda: joy.button(0))"
+            )
+
+
+class TestEmitPhase3:
+    def test_shape_grab(self):
+        c = _emit(
+            "from amiga import Bitmap, Shape\n"
+            "bm = Bitmap(16, 16)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)"
+        )
+        assert "AmipyShape s;" in c
+        assert "amipython_shape_grab(&s, &bm, 0, 0, 16, 16);" in c
+
+    def test_display_blit(self):
+        c = _emit(
+            "from amiga import Display, Bitmap, Shape\n"
+            "d = Display(320, 200)\n"
+            "bm = Bitmap(16, 16)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)\n"
+            "d.blit(s, 10, 20)"
+        )
+        assert "amipython_display_blit(&d, &s, 10, 20);" in c
+
+    def test_rnd(self):
+        c = _emit("from amiga import rnd\nx = rnd(100)")
+        assert "x = amipython_rnd(100);" in c
+
+    def test_joy_button(self):
+        c = _emit("from amiga import joy\nx = joy.button(0)")
+        assert "x = amipython_joy_button(0);" in c
+
+    def test_run_emit(self):
+        c = _emit(
+            "from amiga import run, joy\n"
+            "def update():\n"
+            "    pass\n"
+            "run(update, until=lambda: joy.button(0))"
+        )
+        assert "while (!(amipython_joy_button(0)))" in c
+        assert "update();" in c
+        assert "amipython_vwait();" in c
+
+    def test_shape_variable_declaration(self):
+        c = _emit(
+            "from amiga import Bitmap, Shape\n"
+            "bm = Bitmap(16, 16)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)"
+        )
+        assert "AmipyShape s;" in c

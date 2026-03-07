@@ -29,14 +29,23 @@ class EngineObjectType:
     python_name: str
     c_type: str
     c_init: str
-    constructor: EngineConstructor
+    constructor: EngineConstructor | None
     methods: dict[str, EngineMethod]
+    static_methods: dict[str, EngineStaticMethod] = field(default_factory=dict)
 
 
 @dataclass
 class EngineModuleType:
     python_name: str
     functions: dict[str, EngineMethod]
+
+
+@dataclass
+class EngineStaticMethod:
+    name: str
+    c_name: str
+    params: list[EngineParam]
+    return_type: AmipyType
 
 
 @dataclass
@@ -66,6 +75,16 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 name="show",
                 c_name="amipython_display_show",
                 params=[EngineParam("bm", AmipyType.BITMAP)],
+                return_type=AmipyType.VOID,
+            ),
+            "blit": EngineMethod(
+                name="blit",
+                c_name="amipython_display_blit",
+                params=[
+                    EngineParam("shape", AmipyType.SHAPE),
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
                 return_type=AmipyType.VOID,
             ),
         },
@@ -111,6 +130,27 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
             ),
         },
     ),
+    "Shape": EngineObjectType(
+        python_name="Shape",
+        c_type="AmipyShape",
+        c_init=None,  # No direct constructor — use Shape.grab()
+        constructor=None,
+        methods={},
+        static_methods={
+            "grab": EngineStaticMethod(
+                name="grab",
+                c_name="amipython_shape_grab",
+                params=[
+                    EngineParam("bm", AmipyType.BITMAP),
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("w", AmipyType.INT),
+                    EngineParam("h", AmipyType.INT),
+                ],
+                return_type=AmipyType.SHAPE,
+            ),
+        },
+    ),
 }
 
 MODULE_TYPES: dict[str, EngineModuleType] = {
@@ -141,6 +181,17 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
             ),
         },
     ),
+    "joy": EngineModuleType(
+        python_name="joy",
+        functions={
+            "button": EngineMethod(
+                name="button",
+                c_name="amipython_joy_button",
+                params=[EngineParam("port", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
+        },
+    ),
 }
 
 BUILTINS: dict[str, EngineBuiltin] = {
@@ -156,6 +207,12 @@ BUILTINS: dict[str, EngineBuiltin] = {
         params=[],
         return_type=AmipyType.VOID,
     ),
+    "rnd": EngineBuiltin(
+        python_name="rnd",
+        c_name="amipython_rnd",
+        params=[EngineParam("n", AmipyType.INT)],
+        return_type=AmipyType.INT,
+    ),
 }
 
-ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS)
+ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run"}

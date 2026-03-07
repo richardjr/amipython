@@ -12,6 +12,7 @@ class AmipyType(Enum):
     VOID = auto()
     DISPLAY = auto()
     BITMAP = auto()
+    SHAPE = auto()
     MODULE = auto()  # engine module (palette, copper, etc.)
 
 
@@ -32,12 +33,14 @@ C_TYPE_MAP: dict[AmipyType, str] = {
     AmipyType.VOID: "void",
     AmipyType.DISPLAY: "AmipyDisplay",
     AmipyType.BITMAP: "AmipyBitmap",
+    AmipyType.SHAPE: "AmipyShape",
 }
 
 # Map engine Python type names to AmipyType
 ENGINE_TYPE_MAP: dict[str, AmipyType] = {
     "Display": AmipyType.DISPLAY,
     "Bitmap": AmipyType.BITMAP,
+    "Shape": AmipyType.SHAPE,
 }
 
 # printf format specifiers for each type

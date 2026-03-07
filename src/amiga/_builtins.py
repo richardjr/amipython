@@ -1,6 +1,8 @@
-"""Engine builtin functions — wait_mouse, vwait."""
+"""Engine builtin functions — wait_mouse, vwait, rnd, run."""
 
 from __future__ import annotations
+
+import random
 
 try:
     import pygame
@@ -31,4 +33,27 @@ def vwait(n: int = 1) -> None:
         if not backend._running:
             break
         backend.pump_events()
+        backend.wait_vblank()
+
+
+def rnd(n: int) -> int:
+    """Return a random integer from 0 to n-1."""
+    if n <= 0:
+        return 0
+    return random.randint(0, n - 1)
+
+
+def run(update_fn, *, until=None) -> None:
+    """Game loop — calls update_fn each frame until the until condition is True.
+
+    until should be a callable that returns True to stop the loop.
+    """
+    backend = Backend.get()
+    while backend._running:
+        backend.pump_events()
+        if not backend._running:
+            break
+        if until is not None and until():
+            break
+        update_fn()
         backend.wait_vblank()

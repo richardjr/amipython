@@ -6,7 +6,7 @@ Pass 2: Walk function bodies and module-level code, inferring expression types.
 
 import ast
 
-from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
+from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES, EngineStaticMethod
 from amipython.errors import TypeCheckError
 from amipython.types import (
     ANNOTATION_MAP,
@@ -326,7 +326,10 @@ class _TypeChecker(ast.NodeVisitor):
             # Engine constructor: Display(...), Bitmap(...)
             if name in OBJECT_TYPES and name in self.info.engine_imports:
                 return self._infer_engine_constructor(node, name)
-            # Engine builtin: wait_mouse(), vwait()
+            # run(update, until=expr) — special game loop builtin
+            if name == "run" and name in self.info.engine_imports:
+                return self._infer_run_call(node)
+            # Engine builtin: wait_mouse(), vwait(), rnd()
             if name in BUILTINS and name in self.info.engine_imports:
                 builtin = BUILTINS[name]
                 if len(node.args) != len(builtin.params):
@@ -401,6 +404,52 @@ class _TypeChecker(ast.NodeVisitor):
                 )
         return ENGINE_TYPE_MAP[name]
 
+    def _infer_run_call(self, node: ast.Call) -> AmipyType:
+        """Type-check run(update_fn, until=lambda: expr)."""
+        if len(node.args) != 1:
+            raise TypeCheckError(
+                "run() expects exactly 1 positional argument (update function)",
+                lineno=node.lineno,
+            )
+        # First arg must be a function name
+        func_arg = node.args[0]
+        if not isinstance(func_arg, ast.Name):
+            raise TypeCheckError(
+                "run() first argument must be a function name",
+                lineno=node.lineno,
+            )
+        if func_arg.id not in self.info.functions:
+            raise TypeCheckError(
+                f"run() argument '{func_arg.id}' is not a defined function",
+                lineno=node.lineno,
+            )
+        # Mark the func_arg as VOID so _infer doesn't complain
+        self._set_type(func_arg, AmipyType.VOID)
+        # Check until= keyword
+        has_until = False
+        for kw in node.keywords:
+            if kw.arg == "until":
+                if not isinstance(kw.value, ast.Lambda):
+                    raise TypeCheckError(
+                        "run(until=...) must use a lambda: "
+                        "run(update, until=lambda: expr)",
+                        lineno=node.lineno,
+                    )
+                # Type-check the lambda body expression
+                self._infer(kw.value.body)
+                has_until = True
+            else:
+                raise TypeCheckError(
+                    f"run() got unexpected keyword argument '{kw.arg}'",
+                    lineno=node.lineno,
+                )
+        if not has_until:
+            raise TypeCheckError(
+                "run() requires 'until=' keyword argument",
+                lineno=node.lineno,
+            )
+        return AmipyType.VOID
+
     def _infer_method_call(self, node: ast.Call) -> AmipyType:
         attr = node.func
         if not isinstance(attr.value, ast.Name):
@@ -409,6 +458,10 @@ class _TypeChecker(ast.NodeVisitor):
             )
         obj_name = attr.value.id
         method_name = attr.attr
+
+        # Static method call: Shape.grab(...)
+        if obj_name in OBJECT_TYPES and obj_name in self.info.engine_imports:
+            return self._infer_static_method_call(node, obj_name, method_name)
 
         # Module function call: palette.aga(...)
         if obj_name in self.info.engine_modules:
@@ -461,6 +514,26 @@ class _TypeChecker(ast.NodeVisitor):
         for arg in node.args:
             self._infer(arg)
         return method.return_type
+
+    def _infer_static_method_call(
+        self, node: ast.Call, class_name: str, method_name: str
+    ) -> AmipyType:
+        obj_type = OBJECT_TYPES[class_name]
+        if method_name not in obj_type.static_methods:
+            raise TypeCheckError(
+                f"'{class_name}' has no static method '{method_name}'",
+                lineno=node.lineno,
+            )
+        static = obj_type.static_methods[method_name]
+        if len(node.args) != len(static.params):
+            raise TypeCheckError(
+                f"'{class_name}.{method_name}()' expects {len(static.params)} "
+                f"arguments, got {len(node.args)}",
+                lineno=node.lineno,
+            )
+        for arg in node.args:
+            self._infer(arg)
+        return static.return_type
 
     def _infer_attribute(self, node: ast.Attribute) -> AmipyType:
         """Infer type for attribute access (non-call)."""

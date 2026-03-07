@@ -16,6 +16,16 @@ examples/**/*.c
 examples/**/*.h
 examples/**/CMakeLists.txt
 
+# Compiled Amiga binaries (extensionless executables in example dirs)
+examples/basic/display1
+examples/basic/minimal_display
+examples/animation/bounce_int
+examples/animation/bouncing_ball
+
+# Amiberry boot dir — only S/Startup-Sequence is source
+amiberry_boot/*
+!amiberry_boot/S/
+
 # IDE
 .vscode/
 .idea/

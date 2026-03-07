@@ -210,6 +210,94 @@ d.show(bm)
 ''')
         assert "[display] show 320x256 on 320x256" in output
 
+    def test_shape_grab(self):
+        output = _compile_and_run('''
+from amiga import Bitmap, Shape
+bm = Bitmap(16, 16, bitplanes=3)
+bm.circle_filled(8, 8, 7, 1)
+ball = Shape.grab(bm, 0, 0, 16, 16)
+''')
+        assert "[bitmap] init 16x16 3bp" in output
+        assert "[shape] grab 16x16 from 16x16 at 0,0" in output
+
+    def test_display_blit(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, Shape
+d = Display(320, 200, bitplanes=3)
+bm = Bitmap(16, 16, bitplanes=3)
+bm.circle_filled(8, 8, 7, 1)
+ball = Shape.grab(bm, 0, 0, 16, 16)
+d.blit(ball, 100, 50)
+''')
+        assert "[display] blit 16x16 at 100,50" in output
+
+    def test_rnd(self):
+        output = _compile_and_run('''
+from amiga import rnd
+x = rnd(100)
+''')
+        assert "[rnd] 100" in output
+
+    def test_joy_button(self):
+        output = _compile_and_run('''
+from amiga import joy
+x = joy.button(0)
+''')
+        assert "[input] joy_button port=0" in output
+
+    def test_run_game_loop(self):
+        output = _compile_and_run('''
+from amiga import run, joy
+count: int = 0
+
+def update():
+    global count
+    count = count + 1
+
+run(update, until=lambda: joy.button(0))
+print("iterations =", count)
+''')
+        # joy.button returns TRUE after 3 calls, so loop runs 3 times
+        assert "iterations = 3" in output
+
+    def test_bouncing_ball(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, Shape, palette, run, joy, vwait
+
+display = Display(320, 200, bitplanes=3)
+bm = Bitmap(320, 200, bitplanes=3)
+
+palette.set(1, 15, 0, 0)
+bm.circle_filled(8, 8, 7, 1)
+ball = Shape.grab(bm, 0, 0, 16, 16)
+bm.clear()
+
+x: float = 160.0
+y: float = 100.0
+xs: float = 3.0
+ys: float = 2.0
+
+display.show(bm)
+
+def update():
+    global x, y, xs, ys
+    x = x + xs
+    y = y + ys
+    if x < 10.0 or x > 290.0:
+        xs = -xs
+    if y < 10.0 or y > 170.0:
+        ys = -ys
+    bm.clear()
+    display.blit(ball, int(x), int(y))
+
+run(update, until=lambda: joy.button(0))
+''')
+        assert "[display] init 320x200 3bp" in output
+        assert "[shape] grab 16x16 from 320x200 at 0,0" in output
+        assert "[display] show 320x200 on 320x200" in output
+        # The loop runs 3 times before joy.button returns TRUE
+        assert output.count("[input] vwait") == 3
+
     def test_display1_example(self):
         output = _compile_and_run('''
 from amiga import Display, Bitmap, palette, wait_mouse

@@ -27,6 +27,7 @@
 
 /* Global ACE state — the display that's currently active */
 static AmipyDisplay *s_pActiveDisplay = 0;
+static AmipyBitmap *s_pActiveBitmap = 0;  /* user bitmap linked via show() */
 
 /* Palette buffer — stores colors set before display.show() */
 #define PALETTE_MAX 256
@@ -48,6 +49,11 @@ void amipython_engine_destroy(void) {
     if (s_pActiveDisplay && s_pActiveDisplay->pView) {
         viewLoad(0);
         systemUse();
+        /* User bitmap was redirected to pBfr->pBack in display_show.
+         * viewDestroy destroys pBfr->pBack, so null out user ptr to avoid double-free. */
+        if (s_pActiveBitmap) {
+            s_pActiveBitmap->pBitmap = 0;
+        }
         viewDestroy(s_pActiveDisplay->pView);
         s_pActiveDisplay->pView = 0;
         s_pActiveDisplay->pVPort = 0;
@@ -81,6 +87,7 @@ void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp) {
     d->pBfr = simpleBufferCreate(0,
         TAG_SIMPLEBUFFER_VPORT, d->pVPort,
         TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
+        TAG_SIMPLEBUFFER_USE_X_SCROLLING, 0,
         TAG_DONE
     );
 }
@@ -99,25 +106,61 @@ static void _flushPendingPalette(AmipyDisplay *d) {
     }
 }
 
-void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
-    /* Copy the user bitmap into the display's back buffer, then activate */
-    if (bm->pBitmap && d->pBfr) {
-        blitCopyAligned(
-            bm->pBitmap, 0, 0,
-            d->pBfr->pBack, 0, 0,
-            d->width, d->height
+void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
+    /* Blit the shape's bitmap onto the user bitmap (linked via show()).
+     * The vwait() call will copy the user bitmap to the display. */
+    if (s_pActiveBitmap && s_pActiveBitmap->pBitmap && shape->pBitmap) {
+        blitWait();
+        blitCopy(
+            shape->pBitmap, 0, 0,
+            s_pActiveBitmap->pBitmap, (WORD)x, (WORD)y,
+            shape->width, shape->height,
+            MINTERM_COOKIE
         );
     }
+    (void)d;
+}
 
-    /* Apply any palette entries that were buffered before display was active */
+void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
+    /* Track state */
     s_pActiveDisplay = d;
+    s_pActiveBitmap = bm;
     _flushPendingPalette(d);
 
-    /* Load view THEN hand over hardware (ACE pattern) */
+    /* Redirect user bitmap to display buffer.
+     * Copy content, then point user bitmap at display's bitmap.
+     * Old bitmap is leaked (TODO: fix after debugging). */
+    if (bm->pBitmap && d->pBfr && d->pBfr->pBack) {
+        UBYTE i;
+        tBitMap *pSrc = bm->pBitmap;
+        tBitMap *pDst = d->pBfr->pBack;
+        ULONG ulSize = (ULONG)pDst->BytesPerRow * pDst->Rows;
+        for (i = 0; i < pDst->Depth; ++i) {
+            CopyMem(pSrc->Planes[i], pDst->Planes[i], ulSize);
+        }
+        /* Skip bitmapDestroy for now — test if it's causing the hang */
+        bm->pBitmap = d->pBfr->pBack;
+    }
+
+    /* Load view + take over hardware */
     viewLoad(d->pView);
     systemUnuse();
+}
 
-    vPortWaitForEnd(d->pVPort);
+static void _dirtyReset(AmipyBitmap *bm) {
+    bm->dirtyX1 = (WORD)bm->width;
+    bm->dirtyY1 = (WORD)bm->height;
+    bm->dirtyX2 = 0;
+    bm->dirtyY2 = 0;
+    bm->hasDirty = 0;
+}
+
+static void _dirtyExpand(AmipyBitmap *bm, WORD x1, WORD y1, WORD x2, WORD y2) {
+    if (x1 < bm->dirtyX1) bm->dirtyX1 = x1;
+    if (y1 < bm->dirtyY1) bm->dirtyY1 = y1;
+    if (x2 > bm->dirtyX2) bm->dirtyX2 = x2;
+    if (y2 > bm->dirtyY2) bm->dirtyY2 = y2;
+    bm->hasDirty = 1;
 }
 
 void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
@@ -125,6 +168,7 @@ void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
     bm->height = (UWORD)h;
     bm->bitplanes = (UBYTE)bp;
     bm->pBitmap = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, BMF_CLEAR);
+    _dirtyReset(bm);
 }
 
 void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, LONG color) {
@@ -135,10 +179,20 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
     LONG d = 1 - r;
     LONG bw = (LONG)bm->width;
     LONG bh = (LONG)bm->height;
+    /* Dirty rect: bounding box of the circle, clamped to bitmap */
+    {
+        WORD dx1 = (WORD)(cx - r), dy1 = (WORD)(cy - r);
+        WORD dx2 = (WORD)(cx + r), dy2 = (WORD)(cy + r);
+        if (dx1 < 0) dx1 = 0;
+        if (dy1 < 0) dy1 = 0;
+        if (dx2 >= (WORD)bw) dx2 = (WORD)(bw - 1);
+        if (dy2 >= (WORD)bh) dy2 = (WORD)(bh - 1);
+        if (dx1 <= dx2 && dy1 <= dy2) _dirtyExpand(bm, dx1, dy1, dx2, dy2);
+    }
 
     if (r <= 0) {
         if (cx >= 0 && cx < bw && cy >= 0 && cy < bh) {
-            chunkyToPlanar(bm->pBitmap, (UWORD)cx, (UWORD)cy, (UBYTE)color);
+            chunkyToPlanar((UBYTE)color, (UWORD)cx, (UWORD)cy, bm->pBitmap);
         }
         return;
     }
@@ -192,14 +246,24 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
 
 void amipython_bitmap_clear(AmipyBitmap *bm) {
     if (bm->pBitmap) {
-        blitRect(bm->pBitmap, 0, 0, bm->width, bm->height, 0);
+        blitWait();
+        if (bm->hasDirty) {
+            /* Only clear the area that was drawn to */
+            UWORD cw = (UWORD)(bm->dirtyX2 - bm->dirtyX1 + 1);
+            UWORD ch = (UWORD)(bm->dirtyY2 - bm->dirtyY1 + 1);
+            blitRect(bm->pBitmap, (UWORD)bm->dirtyX1, (UWORD)bm->dirtyY1, cw, ch, 0);
+            _dirtyReset(bm);
+        } else {
+            blitRect(bm->pBitmap, 0, 0, bm->width, bm->height, 0);
+        }
     }
 }
 
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     if (bm->pBitmap && x >= 0 && x < (LONG)bm->width
         && y >= 0 && y < (LONG)bm->height) {
-        chunkyToPlanar(bm->pBitmap, (UWORD)x, (UWORD)y, (UBYTE)color);
+        _dirtyExpand(bm, (WORD)x, (WORD)y, (WORD)x, (WORD)y);
+        chunkyToPlanar((UBYTE)color, (UWORD)x, (UWORD)y, bm->pBitmap);
     }
 }
 
@@ -251,8 +315,46 @@ void amipython_wait_mouse(void) {
 
 void amipython_vwait(void) {
     if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
+        blitWait();
         vPortWaitForEnd(s_pActiveDisplay->pVPort);
+        copProcessBlocks();
     }
+}
+
+void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    /* Create a new bitmap and copy the region from the source */
+    shape->width = (UWORD)w;
+    shape->height = (UWORD)h;
+    shape->bitplanes = bm->bitplanes;
+    shape->pBitmap = bitmapCreate((UWORD)w, (UWORD)h, bm->bitplanes, BMF_CLEAR);
+    if (shape->pBitmap && bm->pBitmap) {
+        blitCopy(
+            bm->pBitmap, (WORD)x, (WORD)y,
+            shape->pBitmap, 0, 0,
+            (UWORD)w, (UWORD)h,
+            MINTERM_COOKIE
+        );
+    }
+}
+
+static UWORD s_uwJoyIgnoreCount = 10;  /* ignore first 10 frames (Amiberry LMB quirk) */
+
+BOOL amipython_joy_button(LONG port) {
+    mouseProcess();
+    if (s_uwJoyIgnoreCount > 0) {
+        s_uwJoyIgnoreCount--;
+        return FALSE;
+    }
+    return mouseUse(MOUSE_PORT_1, MOUSE_LMB) ? TRUE : FALSE;
+    (void)port;
+}
+
+LONG amipython_rnd(LONG n) {
+    /* Simple LCG — adequate for games */
+    static ULONG s_seed = 12345;
+    if (n <= 0) return 0;
+    s_seed = s_seed * 1103515245UL + 12345;
+    return (LONG)((s_seed >> 16) % (ULONG)n);
 }
 
 #else
@@ -287,6 +389,19 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
     amipython_print_str("x");
     _print_uword(d->height);
     amipython_print_str("\n");
+}
+
+void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
+    amipython_print_str("[display] blit ");
+    _print_uword(shape->width);
+    amipython_print_str("x");
+    _print_uword(shape->height);
+    amipython_print_str(" at ");
+    amipython_print_long(x);
+    amipython_print_str(",");
+    amipython_print_long(y);
+    amipython_print_str("\n");
+    (void)d;
 }
 
 void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
@@ -356,12 +471,39 @@ void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b) {
     amipython_print_str("\n");
 }
 
+void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    shape->width = (UWORD)w;
+    shape->height = (UWORD)h;
+    shape->data = 0;
+    amipython_print_str("[shape] grab ");
+    amipython_print_long(w);
+    amipython_print_str("x");
+    amipython_print_long(h);
+    amipython_print_str("\n");
+    (void)bm; (void)x; (void)y;
+}
+
+BOOL amipython_joy_button(LONG port) {
+    amipython_print_str("[input] joy_button port=");
+    amipython_print_long(port);
+    amipython_print_str("\n");
+    return TRUE;  /* Always TRUE so loops terminate in vamos */
+}
+
 void amipython_wait_mouse(void) {
     amipython_print_str("[input] wait_mouse\n");
 }
 
 void amipython_vwait(void) {
     amipython_print_str("[input] vwait\n");
+}
+
+LONG amipython_rnd(LONG n) {
+    /* Simple LCG */
+    static ULONG s_seed = 12345;
+    if (n <= 0) return 0;
+    s_seed = s_seed * 1103515245UL + 12345;
+    return (LONG)((s_seed >> 16) % (ULONG)n);
 }
 
 #endif /* ACE_ENGINE */

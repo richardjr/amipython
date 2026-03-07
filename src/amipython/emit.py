@@ -238,6 +238,24 @@ class _Emitter:
                     and node.value.func.id in self.info.engine_imports):
                 self._emit_engine_init(target.id, node.value)
                 return
+            # Static method returning engine type: ball = Shape.grab(bm, ...)
+            if (isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and isinstance(node.value.func.value, ast.Name)
+                    and node.value.func.value.id in OBJECT_TYPES
+                    and node.value.func.value.id in self.info.engine_imports):
+                class_name = node.value.func.value.id
+                method_name = node.value.func.attr
+                obj_type = OBJECT_TYPES[class_name]
+                if method_name in obj_type.static_methods:
+                    static = obj_type.static_methods[method_name]
+                    args_strs = [self._emit_arg(a) for a in node.value.args]
+                    args = ", ".join(args_strs)
+                    if args:
+                        self._line(f"{static.c_name}(&{target.id}, {args});")
+                    else:
+                        self._line(f"{static.c_name}(&{target.id});")
+                    return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")
 
@@ -275,7 +293,12 @@ class _Emitter:
                 if call.func.id == "print":
                     self._emit_print(call)
                     return
-                # Engine builtin: wait_mouse(), vwait()
+                # run(update, until=expr) — game loop
+                if (call.func.id == "run"
+                        and "run" in self.info.engine_imports):
+                    self._emit_run(call)
+                    return
+                # Engine builtin: wait_mouse(), vwait(), rnd()
                 if (call.func.id in BUILTINS
                         and call.func.id in self.info.engine_imports):
                     builtin = BUILTINS[call.func.id]
@@ -335,6 +358,15 @@ class _Emitter:
         obj_name = attr.value.id
         method_name = attr.attr
         args_strs = [self._emit_arg(a) for a in call.args]
+
+        # Static method: Shape.grab(...)
+        if (obj_name in OBJECT_TYPES
+                and obj_name in self.info.engine_imports
+                and method_name in OBJECT_TYPES[obj_name].static_methods):
+            static = OBJECT_TYPES[obj_name].static_methods[method_name]
+            args = ", ".join(args_strs)
+            self._line(f"{static.c_name}({args});")
+            return
 
         # Module function: palette.aga(...)
         if obj_name in self.info.engine_modules:
@@ -650,6 +682,14 @@ class _Emitter:
         method_name = attr.attr
         args_strs = [self._emit_arg(a) for a in call.args]
 
+        # Static method: Shape.grab(...)
+        if (obj_name in OBJECT_TYPES
+                and obj_name in self.info.engine_imports
+                and method_name in OBJECT_TYPES[obj_name].static_methods):
+            static = OBJECT_TYPES[obj_name].static_methods[method_name]
+            args = ", ".join(args_strs)
+            return f"{static.c_name}({args})"
+
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
@@ -682,7 +722,22 @@ class _Emitter:
         return None
 
     def _is_engine_object_type(self, t: AmipyType) -> bool:
-        return t in (AmipyType.DISPLAY, AmipyType.BITMAP)
+        return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE)
+
+    def _emit_run(self, call: ast.Call):
+        """Emit run(update, until=lambda: expr) as a game loop."""
+        func_name = call.args[0].id
+        until_expr = None
+        for kw in call.keywords:
+            if kw.arg == "until":
+                # Extract expression from lambda body
+                until_expr = self._emit_expr(kw.value.body)
+        self._line(f"while (!({until_expr})) {{")
+        self.indent += 1
+        self._line("amipython_vwait();")
+        self._line(f"{func_name}();")
+        self.indent -= 1
+        self._line("}")
 
     def _emit_arg(self, node: ast.expr) -> str:
         """Emit an argument, adding & for engine object references."""

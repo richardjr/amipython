@@ -65,6 +65,8 @@ ALLOWED_NODES = frozenset({
     # Import / keyword support
     ast.keyword,
     ast.alias,
+    # Lambda (used in run(until=lambda: ...))
+    ast.Lambda,
 })
 
 # Built-in functions allowed in Phase 1
@@ -139,12 +141,15 @@ class Validator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call):
-        # Allow keyword arguments for engine constructor calls
+        # Allow keyword arguments for engine constructor calls and run()
         if node.keywords:
             is_engine_constructor = (
                 isinstance(node.func, ast.Name) and node.func.id in OBJECT_TYPES
             )
-            if not is_engine_constructor:
+            is_run_call = (
+                isinstance(node.func, ast.Name) and node.func.id == "run"
+            )
+            if not is_engine_constructor and not is_run_call:
                 self._reject(node, "keyword arguments are not supported")
         if node.starargs if hasattr(node, "starargs") else False:
             self._reject(node, "star arguments are not supported")
