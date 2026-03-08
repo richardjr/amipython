@@ -76,7 +76,10 @@ void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp) {
     d->pVPort = 0;
     d->pBfr = 0;
 
-    d->pView = viewCreate(0, TAG_DONE);
+    d->pView = viewCreate(0,
+        TAG_VIEW_WINDOW_HEIGHT, (UWORD)h,
+        TAG_DONE
+    );
     d->pVPort = vPortCreate(0,
         TAG_VPORT_VIEW, d->pView,
         TAG_VPORT_BPP, (UWORD)bp,
@@ -135,20 +138,27 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
      * Use blitCopy (not CopyMem) — handles different bitmap formats
      * (e.g. interleaved SimpleBuffer vs non-interleaved user bitmap). */
     if (bm->pBitmap && d->pBfr && d->pBfr->pBack) {
+        tBitMap *pOldBm = bm->pBitmap;
         blitWait();
         blitCopy(
-            bm->pBitmap, 0, 0,
+            pOldBm, 0, 0,
             d->pBfr->pBack, 0, 0,
             bm->width, bm->height,
             MINTERM_COOKIE
         );
         bm->pBitmap = d->pBfr->pBack;
         _dirtyReset(bm);
+        /* Free the old user bitmap to prevent chip RAM overlap/interference */
+        blitWait();
+        bitmapDestroy(pOldBm);
     }
 
     /* Load view + take over hardware */
     viewLoad(d->pView);
     systemUnuse();
+
+    /* Clamp mouse coordinates to bitmap dimensions */
+    mouseSetBounds(MOUSE_PORT_1, 0, 0, (UWORD)(d->width - 1), (UWORD)(d->height - 1));
 }
 
 static void _dirtyReset(AmipyBitmap *bm) {
@@ -278,7 +288,7 @@ void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
         && y >= 0 && y < (LONG)bm->height) {
         _dirtyExpand(bm, (WORD)x, (WORD)y, (WORD)x, (WORD)y);
         blitWait();
-        chunkyToPlanar((UBYTE)color, (UWORD)x, (UWORD)y, bm->pBitmap);
+        blitRect(bm->pBitmap, (UWORD)x, (UWORD)y, 1, 1, (UBYTE)color);
     }
 }
 
@@ -334,7 +344,6 @@ void amipython_vwait(LONG n) {
         for (i = 0; i < n; i++) {
             blitWait();
             vPortWaitForEnd(s_pActiveDisplay->pVPort);
-            copProcessBlocks();
         }
     }
 }
@@ -504,7 +513,8 @@ void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, 
         err = dx - dy;
         for (;;) {
             if (x1 >= 0 && x1 < bw && y1 >= 0 && y1 < bh) {
-                chunkyToPlanar((UBYTE)color, (UWORD)x1, (UWORD)y1, bm->pBitmap);
+                blitWait();
+                blitRect(bm->pBitmap, (UWORD)x1, (UWORD)y1, 1, 1, (UBYTE)color);
             }
             if (x1 == x2 && y1 == y2) break;
             e2 = 2 * err;
@@ -578,33 +588,60 @@ static const UBYTE s_font8x8[][8] = {
 };
 
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color) {
+    /* Render 8x8 bitmap font.
+     * First clears the text area to black, then draws colored blocks
+     * for set glyph pixels. Both happen back-to-back to avoid beam racing. */
     LONG cx = x;
     LONG bw = (LONG)bm->width, bh = (LONG)bm->height;
+    LONG textLen = 0;
+    const char *p;
     if (!bm->pBitmap || !text) return;
+    for (p = text; *p; p++) textLen++;
     _dirtyExpand(bm, (WORD)x, (WORD)y,
-                 (WORD)(x + 8 * 20), (WORD)(y + 8));  /* rough estimate */
+                 (WORD)(x + 8 * textLen - 1), (WORD)(y + 7));
+    /* Erase text area to black first, then immediately draw colored text.
+     * Both happen back-to-back to minimise beam racing tearing. */
     blitWait();
+    blitRect(bm->pBitmap, (UWORD)x, (UWORD)y, (UWORD)(textLen * 8), 8, 0);
+    /* Draw each character — solid color block, then carve out unset pixels */
     while (*text) {
         UBYTE ch = (UBYTE)*text;
         const UBYTE *glyph;
-        LONG row, col;
-        /* Map lowercase to uppercase */
+        LONG row;
         if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A';
-        /* Get glyph from font table (0x20 to 0x5A range) */
         if (ch >= 0x20 && ch <= 0x5A) {
             glyph = s_font8x8[ch - 0x20];
         } else {
-            glyph = s_font8x8[0]; /* space */
+            glyph = s_font8x8[0];
         }
-        for (row = 0; row < 8; row++) {
-            UBYTE bits = glyph[row];
-            for (col = 0; col < 8; col++) {
-                LONG bx = cx + col, by = y + row;
-                if (bx >= 0 && bx < bw && by >= 0 && by < bh) {
-                    if (bits & (0x80 >> col)) {
-                        chunkyToPlanar((UBYTE)color, (UWORD)bx, (UWORD)by, bm->pBitmap);
-                    } else {
-                        chunkyToPlanar(0, (UWORD)bx, (UWORD)by, bm->pBitmap);
+        if (cx >= 0 && cx + 7 < bw) {
+            /* Draw solid color block for this character */
+            blitWait();
+            blitRect(bm->pBitmap, (UWORD)cx, (UWORD)y, 8, 8, (UBYTE)color);
+            /* Carve out unset pixels to black */
+            for (row = 0; row < 8; row++) {
+                UBYTE bits = glyph[row];
+                LONG by = y + row;
+                if (by < 0 || by >= bh) continue;
+                if (bits == 0xFF) {
+                    /* All set — keep solid color */
+                } else if (bits == 0) {
+                    /* All unset — clear row */
+                    blitWait();
+                    blitRect(bm->pBitmap, (UWORD)cx, (UWORD)by, 8, 1, 0);
+                } else {
+                    /* Mixed — clear runs of unset pixels */
+                    LONG col = 0;
+                    while (col < 8) {
+                        if (!(bits & (0x80 >> col))) {
+                            LONG start = col;
+                            while (col < 8 && !(bits & (0x80 >> col))) col++;
+                            blitWait();
+                            blitRect(bm->pBitmap, (UWORD)(cx + start), (UWORD)by,
+                                     (UWORD)(col - start), 1, 0);
+                        } else {
+                            col++;
+                        }
                     }
                 }
             }
@@ -621,10 +658,10 @@ void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
 
 LONG amipython_rnd(LONG n) {
     /* Simple LCG — adequate for games */
-    static ULONG s_seed = 12345;
+    static unsigned long s_seed = 12345;
     if (n <= 0) return 0;
     s_seed = s_seed * 1103515245UL + 12345;
-    return (LONG)((s_seed >> 16) % (ULONG)n);
+    return (LONG)((s_seed >> 16) % (unsigned long)n);
 }
 
 static float _sin_approx(float x) {
@@ -829,10 +866,10 @@ void amipython_vwait(LONG n) {
 
 LONG amipython_rnd(LONG n) {
     /* Simple LCG */
-    static ULONG s_seed = 12345;
+    static unsigned long s_seed = 12345;
     if (n <= 0) return 0;
     s_seed = s_seed * 1103515245UL + 12345;
-    return (LONG)((s_seed >> 16) % (ULONG)n);
+    return (LONG)((s_seed >> 16) % (unsigned long)n);
 }
 
 void amipython_mouse_set_pointer(AmipySprite *sprite) {

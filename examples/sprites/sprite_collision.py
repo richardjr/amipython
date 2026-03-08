@@ -41,18 +41,18 @@ def update():
     bm.line(ox - 12, oy, ox + 12, oy, 0)
     bm.line(ox, oy - 12, ox, oy + 12, 0)
 
-    # Erase old text area
-    bm.box_filled(0, 0, 47, 8, 0)
-
     # Restore death star where old crosshair may have cut through it
     bm.circle_filled(160, 100, 40, 15)
+
+    # Check collision BEFORE drawing crosshair — otherwise we read
+    # the crosshair colour (14) instead of the circle colour (15)
+    collision.check()
 
     # Draw new crosshair
     bm.line(mx - 12, my, mx + 12, my, 14)
     bm.line(mx, my - 12, mx, my + 12, 14)
 
-    # Check collision and show status
-    collision.check()
+    # Show status
     if player.collided():
         bm.print_at(0, 0, "BANG!", color=15)
     else:
