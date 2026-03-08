@@ -362,3 +362,67 @@ class TestEmitPhase5:
             "s = Shape.load(\"data/ball.bm\")"
         )
         assert 'amipython_shape_load(&s, "data/ball.bm");' in c
+
+
+class TestMusicModule:
+    def test_music_import_accepted(self):
+        assert _validate("from amiga import music") == []
+
+    def test_music_typecheck(self):
+        _typecheck(
+            "from amiga import music\n"
+            "music.load(\"data/song.mod\")\n"
+            "music.play()\n"
+            "music.stop()\n"
+            "music.volume(48)"
+        )
+
+    def test_music_unknown_function_rejected(self):
+        with pytest.raises(TypeCheckError, match="has no function"):
+            _typecheck("from amiga import music\nmusic.foo()")
+
+    def test_music_play_emit(self):
+        c = _emit("from amiga import music\nmusic.play()")
+        assert "amipython_music_play();" in c
+
+    def test_music_stop_emit(self):
+        c = _emit("from amiga import music\nmusic.stop()")
+        assert "amipython_music_stop();" in c
+
+    def test_music_volume_emit(self):
+        c = _emit("from amiga import music\nmusic.volume(48)")
+        assert "amipython_music_volume(48);" in c
+
+    def test_music_load_no_embed(self):
+        """Without source_dir, music.load falls through to regular call."""
+        c = _emit("from amiga import music\nmusic.load(\"data/song.mod\")")
+        assert 'amipython_music_load("data/song.mod");' in c
+
+    def test_music_no_variable_declaration(self):
+        c = _emit("from amiga import music\nmusic.play()")
+        lines = c.split("\n")
+        decl_lines = [l for l in lines if l.strip().endswith(";") and "music" in l
+                      and "amipython_music" not in l]
+        assert decl_lines == []
+
+    def test_music_load_embed(self):
+        """With source_dir and MOD file present, music.load embeds data."""
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a minimal fake MOD file (just needs to exist for embed)
+            mod_dir = os.path.join(tmpdir, "data")
+            os.makedirs(mod_dir)
+            mod_path = os.path.join(mod_dir, "song.mod")
+            with open(mod_path, "wb") as f:
+                f.write(b"\x00" * 32)  # small dummy data
+
+            py_path = os.path.join(tmpdir, "game.py")
+            with open(py_path, "w") as f:
+                f.write('from amiga import music\nmusic.load("data/song.mod")\n')
+
+            c = transpile(open(py_path).read(), filename=py_path)
+            assert "s_modData0" in c
+            assert "amipython_music_load_embedded(s_modData0, s_modSize0);" in c
+            # Should NOT have the regular load call
+            assert 'amipython_music_load("data/song.mod")' not in c

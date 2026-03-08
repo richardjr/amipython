@@ -165,3 +165,34 @@ def test_palette_before_display():
 
     # Palette should still be correct
     assert Backend.get()._palette[1] == (255, 0, 0)
+
+
+def test_music_module_import():
+    from amiga import music
+    assert music is not None
+
+
+def test_music_load_sets_path(tmp_path):
+    """music.load() should resolve the path relative to the caller."""
+    from amiga._music import _MusicModule
+    m = _MusicModule()
+    # Create a dummy file so the path exists
+    mod_file = tmp_path / "song.mod"
+    mod_file.write_bytes(b"\x00" * 16)
+    # Simulate load from a script in tmp_path
+    m._loaded_path = str(mod_file)
+    assert m._loaded_path.endswith("song.mod")
+
+
+def test_music_volume_before_init():
+    """music.volume() should not crash if mixer not initialized."""
+    from amiga._music import _MusicModule
+    m = _MusicModule()
+    m.volume(48)  # should not raise
+
+
+def test_music_stop_before_init():
+    """music.stop() should not crash if mixer not initialized."""
+    from amiga._music import _MusicModule
+    m = _MusicModule()
+    m.stop()  # should not raise

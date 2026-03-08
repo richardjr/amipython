@@ -52,8 +52,27 @@ The preview module currently implements the Phase 2 API:
 | `palette.set(reg, r, g, b)` | Supported — direct OCS 4-bit values |
 | `wait_mouse()` | Supported — waits for LMB click |
 | `vwait()` | Supported — 50fps PAL timing |
+| `rnd(n)` | Supported |
+| `run(update, until=...)` | Supported — 50fps game loop |
+| `Shape.grab(bm, x, y, w, h)` | Supported |
+| `Shape.load(path)` | Supported — loads PNG |
+| `display.blit(shape, x, y)` | Supported |
+| `Sprite.grab(bm, x, y, w, h)` | Supported |
+| `sprite.show(x, y, channel=)` | Supported |
+| `joy.button(port)` | Supported |
+| `mouse.x` / `mouse.y` | Supported |
+| `mouse.set_pointer(sprite)` | Supported |
+| `collision.register(color=, mask=)` | Supported |
+| `collision.check()` | Supported |
+| `bm.box_filled(...)` | Supported |
+| `bm.line(...)` | Supported |
+| `bm.print_at(x, y, text)` | Supported |
+| `sin_table(n)` / `cos_table(n)` | Supported |
+| `music.load(path)` | Supported — loads MOD via pygame.mixer |
+| `music.play()` / `music.stop()` | Supported |
+| `music.volume(vol)` | Supported — 0-64 |
 
-Future phases will add `run()`, sprites, shapes, input, scrolling, copper, and more.
+Not yet implemented: copper effects, dual playfield, scrolling, keyboard input.
 
 ## Palette Fidelity
 
@@ -69,14 +88,10 @@ The internal surface runs at Amiga resolution (e.g. 320x256). The preview window
 
 ## Limitations
 
-- **No `run()` game loop yet** — scripts using `run(update, until=...)` won't work until Phase 3
-- **No input modules** — `joy`, `mouse`, `key` are not yet implemented in the preview
-- **No sprites/shapes** — `Sprite`, `Shape`, `display.blit()` are not yet implemented
 - **No copper effects** — `copper.color_at()` per-scanline palette changes are not emulated
 - **No scrolling** — `display.scroll_to()` is not yet implemented
-- **No sound** — Paula audio is not emulated
-
-These will be added as the corresponding transpiler phases are implemented.
+- **No keyboard input** — `key` module is not yet implemented
+- **No dual playfield** — `DualPlayfield` is not yet implemented
 
 ## Architecture
 
@@ -87,7 +102,13 @@ src/amiga/
     _bitmap.py        # Bitmap with 8-bit indexed surface
     _display.py       # Display — lazy window creation on show()
     _palette.py       # OCS 12-bit palette emulation
-    _builtins.py      # wait_mouse(), vwait()
+    _builtins.py      # wait_mouse(), vwait(), rnd(), run(), sin_table(), cos_table()
+    _shape.py         # Shape — grab/load, blitting
+    _sprite.py        # Sprite — hardware sprite emulation
+    _joy.py           # Joystick input
+    _mouse.py         # Mouse input
+    _collision.py     # Collision detection
+    _music.py         # ProTracker MOD playback via pygame.mixer
     _constants.py     # PAL_FPS=50, MAX_PALETTE=256, DEFAULT_SCALE=3
 ```
 

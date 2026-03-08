@@ -23,7 +23,12 @@ examples/animation/bounce_int
 examples/animation/bouncing_ball
 examples/animation/bouncing_blits
 examples/animation/orbiting_ball
+examples/demo/amipython_demo
+examples/sound/music
 examples/hello
+
+# Docker/CMake build directories inside examples
+examples/**/build/
 
 # ADF floppy images
 *.adf

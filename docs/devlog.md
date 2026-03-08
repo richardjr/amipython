@@ -2,6 +2,27 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2025-03-08: ProTracker MOD playback via ptplayer
+
+**Feature:** `music.load()` / `music.play()` / `music.stop()` / `music.volume()` — background music playback.
+
+**Key decision — embed MOD at transpile time:** Same pattern as images. File I/O doesn't work on Amiberry after ACE's `systemCreate()` takes over the hardware. The MOD file bytes are emitted as a `static const UBYTE[]` C array and parsed from memory at runtime.
+
+**Custom `_modCreateFromMem()` loader:** ACE's ptplayer only has `ptplayerModCreateFromPath()` (file I/O). We needed to parse a MOD from an in-memory buffer. The loader:
+1. Scans the 128-byte arrangement to find the highest pattern number
+2. Allocates chip RAM for pattern data via `memAllocChip()` and copies from the embedded buffer
+3. Allocates chip RAM for each of the 31 samples and copies sample PCM data
+4. Fills the `tPtplayerMod` struct (which has the same 1084-byte header layout as the MOD file)
+5. Sets `isOwningSamples = 1` so `ptplayerModDestroy()` frees the chip RAM
+
+**ACE struct detail:** The `tPtplayerMod` struct uses `pSampleStarts` (not `pSamples`) and the array type is `UWORD *[31]`, not `BYTE *`. The `ulPatternsSize` field must be set for proper cleanup.
+
+**ptplayer lifecycle:** `ptplayerCreate(1)` (PAL) in `engine_create()`, `ptplayerStop()` + `ptplayerModDestroy()` + `ptplayerDestroy()` in `engine_destroy()`. The ptplayer must be destroyed before the view/copper/blitter teardown.
+
+**Files:** `engine.py`, `emit.py` (_embed_music), `amipython_engine.h`, `amipython_engine_amiga.c`, `amipython_engine_host.c`, `src/amiga/_music.py`, `docs/language.md`, `docs/credits.md`
+
+---
+
 ## 2025-03-07: Orbiting ball invisible — three blitter issues
 
 **Problem:** The orbiting ball animation (pre-computed sin/cos trig tables, integer math, clear+blit per frame) ran without crashing but showed a completely black screen. The bouncing ball example worked fine with the same C runtime.

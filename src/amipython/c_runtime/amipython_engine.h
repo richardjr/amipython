@@ -11,11 +11,12 @@
 
 #include "amipython.h"
 
-/* On Amiga, UWORD/UBYTE come from exec/types.h (via amipython.h).
+/* On Amiga, UWORD/UBYTE/ULONG come from exec/types.h (via amipython.h).
    On host, define them. */
 #ifndef AMIGA
 typedef unsigned short UWORD;
 typedef unsigned char UBYTE;
+typedef unsigned long ULONG;
 #endif
 
 #ifdef ACE_ENGINE
@@ -124,5 +125,10 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel);
 void amipython_sin_table(float *out, LONG n);
 void amipython_cos_table(float *out, LONG n);
+void amipython_music_load(const char *path);
+void amipython_music_load_embedded(const UBYTE *data, ULONG size);
+void amipython_music_play(void);
+void amipython_music_stop(void);
+void amipython_music_volume(LONG vol);
 
 #endif /* AMIPYTHON_ENGINE_H */

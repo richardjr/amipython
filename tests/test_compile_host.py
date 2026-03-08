@@ -448,3 +448,19 @@ from amiga import Bitmap
 bm = Bitmap.load("levels/bg.bm")
 ''')
         assert '[bitmap] load "levels/bg.bm"' in output
+
+    def test_music_play_stop(self):
+        output = _compile_and_run('''
+from amiga import music
+music.play()
+music.stop()
+''')
+        assert "[music] play" in output
+        assert "[music] stop" in output
+
+    def test_music_volume(self):
+        output = _compile_and_run('''
+from amiga import music
+music.volume(48)
+''')
+        assert "[music] volume 48" in output

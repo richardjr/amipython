@@ -187,3 +187,24 @@ void amipython_cos_table(float *out, LONG n) {
         out[i] = (float)cos(2.0 * M_PI * (double)i / (double)n);
     }
 }
+
+void amipython_music_load(const char *path) {
+    printf("[music] load \"%s\"\n", path);
+}
+
+void amipython_music_load_embedded(const UBYTE *data, ULONG size) {
+    printf("[music] load_embedded %lu bytes\n", (unsigned long)size);
+    (void)data;
+}
+
+void amipython_music_play(void) {
+    printf("[music] play\n");
+}
+
+void amipython_music_stop(void) {
+    printf("[music] stop\n");
+}
+
+void amipython_music_volume(LONG vol) {
+    printf("[music] volume %ld\n", vol);
+}

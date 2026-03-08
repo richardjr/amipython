@@ -19,6 +19,7 @@
 #include <ace/managers/blit.h>
 #include <ace/managers/copper.h>
 #include <ace/managers/mouse.h>
+#include <ace/managers/ptplayer.h>
 #include <ace/managers/viewport/simplebuffer.h>
 #include <ace/utils/extview.h>
 #include <ace/utils/bitmap.h>
@@ -28,6 +29,7 @@
 /* Global ACE state — the display that's currently active */
 static AmipyDisplay *s_pActiveDisplay = 0;
 static AmipyBitmap *s_pActiveBitmap = 0;  /* user bitmap linked via show() */
+static tPtplayerMod *s_pMod = 0;
 
 /* Palette buffer — stores colors set before display.show() */
 #define PALETTE_MAX 256
@@ -43,9 +45,16 @@ void amipython_engine_create(void) {
     blitManagerCreate();
     copCreate();
     mouseCreate(MOUSE_PORT_1);
+    ptplayerCreate(1);  /* 1 = PAL */
 }
 
 void amipython_engine_destroy(void) {
+    ptplayerStop();
+    if (s_pMod) {
+        ptplayerModDestroy(s_pMod);
+        s_pMod = 0;
+    }
+    ptplayerDestroy();
     if (s_pActiveDisplay && s_pActiveDisplay->pView) {
         viewLoad(0);
         systemUse();
@@ -764,6 +773,123 @@ void amipython_cos_table(float *out, LONG n) {
     }
 }
 
+/* ----------------------------------------------------------------
+ * Music — ProTracker MOD playback via ptplayer
+ * ---------------------------------------------------------------- */
+
+static tPtplayerMod *_modCreateFromMem(const UBYTE *data, ULONG size) {
+    /*
+     * Parse a 31-sample ProTracker MOD from a memory buffer.
+     * Allocates chip RAM for patterns and samples, fills a tPtplayerMod struct.
+     *
+     * MOD layout (M.K. format):
+     *   0-19:     Song name
+     *   20-949:   31 sample headers (30 bytes each)
+     *   950:      Song length (positions used)
+     *   951:      Restart position
+     *   952-1079: Pattern arrangement (128 entries)
+     *   1080-1083: "M.K." tag
+     *   1084+:    Pattern data (numPatterns * 1024 bytes)
+     *   After patterns: Sample PCM data
+     */
+    tPtplayerMod *pMod;
+    UBYTE numPatterns = 0;
+    ULONG patternDataSize;
+    ULONG patternOffset;
+    ULONG sampleDataOffset;
+    UBYTE i;
+
+    if (size < 1084) return 0;
+
+    /* Count patterns — highest pattern number in arrangement + 1 */
+    for (i = 0; i < 128; i++) {
+        if (data[952 + i] >= numPatterns) {
+            numPatterns = data[952 + i] + 1;
+        }
+    }
+    if (numPatterns == 0) return 0;
+
+    patternDataSize = (ULONG)numPatterns * 1024UL;
+    patternOffset = 1084;
+    sampleDataOffset = patternOffset + patternDataSize;
+
+    if (sampleDataOffset > size) return 0;
+
+    pMod = (tPtplayerMod *)memAllocFast(sizeof(tPtplayerMod));
+    if (!pMod) return 0;
+
+    /* Copy the 1084-byte header (name, sample headers, arrangement, tag).
+     * This overlaps the start of tPtplayerMod which has the same layout. */
+    CopyMem((APTR)data, (APTR)pMod, 1084);
+
+    /* Allocate chip RAM for pattern data and copy */
+    {
+        UBYTE *pChipPatterns = (UBYTE *)memAllocChip(patternDataSize);
+        if (!pChipPatterns) {
+            memFree(pMod, sizeof(tPtplayerMod));
+            return 0;
+        }
+        CopyMem((APTR)(data + patternOffset), (APTR)pChipPatterns, patternDataSize);
+        pMod->pPatterns = pChipPatterns;
+        pMod->ulPatternsSize = patternDataSize;
+    }
+
+    /* Allocate chip RAM for each sample and copy */
+    {
+        ULONG sampleOff = sampleDataOffset;
+        for (i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; i++) {
+            UWORD sampleWords = pMod->pSampleHeaders[i].uwLength;
+            ULONG sampleBytes = (ULONG)sampleWords * 2;
+            if (sampleBytes > 0 && (sampleOff + sampleBytes) <= size) {
+                UWORD *pChipSample = (UWORD *)memAllocChip(sampleBytes);
+                if (pChipSample) {
+                    CopyMem((APTR)(data + sampleOff), (APTR)pChipSample, sampleBytes);
+                    pMod->pSampleStarts[i] = pChipSample;
+                } else {
+                    pMod->pSampleStarts[i] = 0;
+                }
+                sampleOff += sampleBytes;
+            } else {
+                pMod->pSampleStarts[i] = 0;
+            }
+        }
+    }
+
+    pMod->isOwningSamples = 1;
+    return pMod;
+}
+
+void amipython_music_load(const char *path) {
+    /* File path loading — not used when embedding, but declared for completeness */
+    (void)path;
+}
+
+void amipython_music_load_embedded(const UBYTE *data, ULONG size) {
+    if (s_pMod) {
+        ptplayerStop();
+        ptplayerModDestroy(s_pMod);
+        s_pMod = 0;
+    }
+    s_pMod = _modCreateFromMem(data, size);
+}
+
+void amipython_music_play(void) {
+    if (s_pMod) {
+        ptplayerLoadMod(s_pMod, 0, 0);
+        ptplayerEnableMusic(1);
+    }
+}
+
+void amipython_music_stop(void) {
+    ptplayerEnableMusic(0);
+    ptplayerStop();
+}
+
+void amipython_music_volume(LONG vol) {
+    UBYTE v = (UBYTE)(vol < 0 ? 0 : vol > 64 ? 64 : vol);
+    ptplayerSetMasterVolume(v);
+}
+
 #else
 /* ================================================================
  * dos.library trace stubs (vbcc / vamos)
@@ -1030,6 +1156,31 @@ void amipython_cos_table(float *out, LONG n) {
     amipython_print_long(n);
     amipython_print_str("\n");
     (void)out;
+}
+
+void amipython_music_load(const char *path) {
+    amipython_print_str("[music] load ");
+    amipython_print_str(path);
+    amipython_print_str("\n");
+}
+
+void amipython_music_load_embedded(const UBYTE *data, ULONG size) {
+    amipython_print_str("[music] load_embedded\n");
+    (void)data; (void)size;
+}
+
+void amipython_music_play(void) {
+    amipython_print_str("[music] play\n");
+}
+
+void amipython_music_stop(void) {
+    amipython_print_str("[music] stop\n");
+}
+
+void amipython_music_volume(LONG vol) {
+    amipython_print_str("[music] volume ");
+    amipython_print_long(vol);
+    amipython_print_str("\n");
 }
 
 #endif /* ACE_ENGINE */

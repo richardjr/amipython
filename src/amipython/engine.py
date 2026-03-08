@@ -318,6 +318,35 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
             ),
         },
     ),
+    "music": EngineModuleType(
+        python_name="music",
+        functions={
+            "load": EngineMethod(
+                name="load",
+                c_name="amipython_music_load",
+                params=[EngineParam("path", AmipyType.STR)],
+                return_type=AmipyType.VOID,
+            ),
+            "play": EngineMethod(
+                name="play",
+                c_name="amipython_music_play",
+                params=[],
+                return_type=AmipyType.VOID,
+            ),
+            "stop": EngineMethod(
+                name="stop",
+                c_name="amipython_music_stop",
+                params=[],
+                return_type=AmipyType.VOID,
+            ),
+            "volume": EngineMethod(
+                name="volume",
+                c_name="amipython_music_volume",
+                params=[EngineParam("vol", AmipyType.INT)],
+                return_type=AmipyType.VOID,
+            ),
+        },
+    ),
     "collision": EngineModuleType(
         python_name="collision",
         functions={

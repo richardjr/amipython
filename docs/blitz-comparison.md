@@ -34,7 +34,8 @@ The transpiler generates the C equivalent: a `while` loop with `VWait`, `Display
 | `joy` | Joystick input | `Joyx`, `Joyy`, `Joyb` |
 | `mouse` | Mouse position and buttons | `Mouse On`, `MouseX`, `MouseY`, `MouseArea` |
 | `key` | Keyboard input | `BlitzKeys On`, `RawStatus`, `Inkey$` |
-| `sound` | Paula audio playback | Audio commands |
+| `music` | ProTracker MOD playback | `Module` / `Tracker` / ptplayer |
+| `sound` | Paula audio playback (SFX) | Audio commands |
 | `math` | Fast trig tables, wrap, clamp | `QWrap`, `QLimit`, sin/cos lookup |
 
 ---
@@ -802,6 +803,14 @@ Complete mapping of Blitz Basic blitz-mode capabilities to amipython API.
 | Lookup table pattern | `sin_table(size)` / `cos_table(size)` | Pre-computed |
 | `Abs` / `Sgn` / `Int` | `abs()` / `sgn()` / `int()` | |
 | `LSL` / `LSR` | `<<` / `>>` | Python operators |
+
+### Music & Sound
+| Blitz | amipython | Notes |
+|---|---|---|
+| `LoadModule file$` | `music.load(path)` | MOD embedded at transpile time |
+| `PlayModule` | `music.play()` | Loops by default |
+| `StopModule` | `music.stop()` | |
+| `Volume channel,vol` | `music.volume(vol)` | Master volume 0-64 |
 
 ### Text Output
 | Blitz | amipython | Notes |

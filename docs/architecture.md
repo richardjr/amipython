@@ -28,7 +28,7 @@ Two paths from the same source: **Python preview** for fast iteration (instant, 
 
 2. **Game runtime / engine** — A C library compiled for 68k that handles all Amiga hardware interaction: screen setup, Copper lists, Blitter, sprites, bobs, tilemaps, double-buffering, input, Paula sound, memory management (chip/fast RAM). Built on top of [ACE (Amiga C Engine)](https://github.com/AmigaPorts/ACE).
 
-3. **Asset pipeline** — Converts modern asset formats to Amiga-native formats: PNG to bitplane sprites, WAV to 8SVX audio, Tiled maps to Amiga tilemap format.
+3. **Asset pipeline** — Converts modern asset formats to Amiga-native formats at transpile time. PNG images are converted to planar bitplane data and embedded as C arrays. ProTracker MOD files are embedded as raw byte arrays. No file I/O at runtime — all assets are compiled into the binary.
 
 4. **Build system** — Orchestrates the full pipeline: transpile → cross-compile → link → optionally launch Amiberry for testing.
 
@@ -96,3 +96,5 @@ The build system auto-detects which path to use based on whether the generated C
 - **Amiberry** — [BlitterStudio/amiberry](https://github.com/BlitterStudio/amiberry) — Amiga emulator with IPC/headless support
 - **amitools/vamos** — [cnvogelg/amitools](https://github.com/cnvogelg/amitools) — Headless Amiga binary runner
 - **AmiBlitz3** — [AmiBlitz/AmiBlitz3](https://github.com/AmiBlitz/AmiBlitz3) — Blitz Basic successor, source of reference examples
+- **ptplayer** — Frank Wille's ProTracker replay routine, integrated via ACE's ptplayer manager. CIA-B interrupt-driven MOD playback.
+- **BassoonTracker** — [steffest/BassoonTracker](https://github.com/steffest/BassoonTracker) — Web-based MOD tracker (MIT license). Demo MOD files sourced from its collection.

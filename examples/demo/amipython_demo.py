@@ -7,7 +7,7 @@
 # Loads an amipython logo PNG and blits it over the starfield.
 
 from dataclasses import dataclass
-from amiga import Display, Bitmap, Shape, palette, joy, rnd, run
+from amiga import Display, Bitmap, Shape, palette, joy, music, rnd, run
 
 @dataclass
 class Star:
@@ -15,6 +15,8 @@ class Star:
     y: int
     speed: int
     color: int
+
+music.load("data/demo.mod")
 
 SCREEN_W: int = 320
 SCREEN_H: int = 200
@@ -67,6 +69,7 @@ for i in range(20):
     ))
 
 display.show(bm)
+music.play()
 
 def update():
     bm.clear()
@@ -87,3 +90,4 @@ def update():
         bm.plot(star.x, star.y, star.color)
 
 run(update, until=lambda: joy.button(0))
+music.stop()

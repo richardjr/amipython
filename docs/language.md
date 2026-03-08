@@ -232,12 +232,30 @@ display.show(bg)
 
 ### Engine Modules
 
-Singleton modules like `palette` are called directly:
+Singleton modules like `palette` and `music` are called directly:
 
 ```python
 palette.aga(0, 255, 0, 0)     # 8-bit RGB, downscaled to OCS 12-bit
 palette.set(0, 15, 0, 0)      # direct OCS 4-bit values
 ```
+
+### Music (ProTracker MOD Playback)
+
+Background music playback using ProTracker MOD files:
+
+```python
+from amiga import music
+
+music.load("data/song.mod")   # embed MOD at transpile time
+music.play()                   # start playback (loops forever)
+music.stop()                   # stop playback
+music.volume(48)               # 0-64, default 64
+```
+
+- MOD file is embedded in the binary at transpile time (same approach as images)
+- On Amiga: uses ACE's ptplayer (CIA-B interrupt timing, runs autonomously)
+- In Python preview: uses pygame.mixer for MOD playback
+- No per-frame calls needed — music plays via interrupt
 
 ### Engine Builtins
 

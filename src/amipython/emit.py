@@ -98,6 +98,41 @@ class _Emitter:
         bp = info["depth"]
         return f'amipython_shape_load_embedded(&{var_name}, {data_name}, {w}, {h}, {bp});'
 
+    def _embed_music(self, path_literal: str) -> str | None:
+        """Embed a MOD file at transpile time and return the load call.
+
+        Returns a C statement like:
+            amipython_music_load_embedded(s_modData0, 12345UL);
+
+        The raw byte array is added to self._embedded_decls for emission
+        before main(). Returns None if the file can't be found.
+        """
+        if not self.source_dir:
+            return None
+        import os
+        rel_path = path_literal.strip('"')
+        full = os.path.join(self.source_dir, rel_path)
+        if not os.path.exists(full):
+            return None
+
+        with open(full, "rb") as f:
+            data = f.read()
+
+        data_name = f"s_modData{self._embedded_counter}"
+        size_name = f"s_modSize{self._embedded_counter}"
+        self._embedded_counter += 1
+
+        lines = [f"static const UBYTE {data_name}[] = {{"]
+        for i in range(0, len(data), 16):
+            chunk = data[i:i + 16]
+            hex_vals = ", ".join(f"0x{b:02X}" for b in chunk)
+            lines.append(f"    {hex_vals},")
+        lines.append("};")
+        lines.append(f"static const ULONG {size_name} = {len(data)}UL;")
+        self._embedded_decls.append("\n".join(lines))
+
+        return f"amipython_music_load_embedded({data_name}, {size_name});"
+
     def _line(self, text: str = ""):
         if text:
             self.lines.append("    " * self.indent + text)
@@ -673,6 +708,13 @@ class _Emitter:
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
+            # Intercept music.load() — embed MOD at transpile time
+            if obj_name == "music" and method_name == "load" and call.args:
+                path_str = self._emit_arg(call.args[0])
+                embedded = self._embed_music(path_str)
+                if embedded:
+                    self._line(embedded)
+                    return
             args_strs = self._resolve_method_kwargs(call, func)
             args = ", ".join(args_strs)
             self._line(f"{func.c_name}({args});")
