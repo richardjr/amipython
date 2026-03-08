@@ -298,3 +298,67 @@ class TestEmitPhase3:
             "s = Shape.grab(bm, 0, 0, 16, 16)"
         )
         assert "AmipyShape s;" in c
+
+
+class TestTypecheckPhase5:
+    def test_shape_load_type(self):
+        info = _typecheck(
+            "from amiga import Shape\n"
+            "s = Shape.load(\"data/ball.png\")"
+        )
+        assert info.globals["s"].type == AmipyType.SHAPE
+
+    def test_shape_load_wrong_args(self):
+        with pytest.raises(TypeCheckError, match="expects 1"):
+            _typecheck(
+                "from amiga import Shape\n"
+                "s = Shape.load(\"a\", \"b\")"
+            )
+
+    def test_bitmap_load_type(self):
+        info = _typecheck(
+            "from amiga import Bitmap\n"
+            "bm = Bitmap.load(\"data/bg.png\")"
+        )
+        assert info.globals["bm"].type == AmipyType.BITMAP
+
+    def test_bitmap_load_wrong_args(self):
+        with pytest.raises(TypeCheckError, match="expects 1"):
+            _typecheck(
+                "from amiga import Bitmap\n"
+                "bm = Bitmap.load()"
+            )
+
+
+class TestEmitPhase5:
+    def test_shape_load_png_rewrite(self):
+        c = _emit(
+            "from amiga import Shape\n"
+            "s = Shape.load(\"data/ball.png\")"
+        )
+        assert "AmipyShape s;" in c
+        assert 'amipython_shape_load(&s, "data/ball.bm");' in c
+        assert ".png" not in c
+
+    def test_shape_load_iff_rewrite(self):
+        c = _emit(
+            "from amiga import Shape\n"
+            "s = Shape.load(\"gfx/ship.iff\")"
+        )
+        assert 'amipython_shape_load(&s, "gfx/ship.bm");' in c
+
+    def test_bitmap_load_rewrite(self):
+        c = _emit(
+            "from amiga import Bitmap\n"
+            "bm = Bitmap.load(\"levels/bg.png\")"
+        )
+        assert "AmipyBitmap bm;" in c
+        assert 'amipython_bitmap_load(&bm, "levels/bg.bm");' in c
+
+    def test_shape_load_no_ext_unchanged(self):
+        """Path without .png/.iff extension passes through unchanged."""
+        c = _emit(
+            "from amiga import Shape\n"
+            "s = Shape.load(\"data/ball.bm\")"
+        )
+        assert 'amipython_shape_load(&s, "data/ball.bm");' in c

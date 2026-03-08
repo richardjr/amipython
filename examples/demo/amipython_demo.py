@@ -4,11 +4,10 @@
 # Multi-speed parallax starfield scrolling right-to-left.
 # Three depth layers with different speeds and brightness.
 # Uses 3 bitplanes (8 colours) for star brightness variation.
-#
-# Future: spinning title text (needs bitmap font), music (needs Paula)
+# Loads an amipython logo PNG and blits it over the starfield.
 
 from dataclasses import dataclass
-from amiga import Display, Bitmap, palette, joy, rnd, run
+from amiga import Display, Bitmap, Shape, palette, joy, rnd, run
 
 @dataclass
 class Star:
@@ -32,6 +31,11 @@ palette.set(4, 9, 9, 12)
 palette.set(5, 11, 11, 14)
 palette.set(6, 13, 13, 15)
 palette.set(7, 15, 15, 15)
+
+# Load the amipython logo (192x56, same palette, color 0 = transparent)
+logo = Shape.load("data/logo.png")
+LOGO_X: int = 64
+LOGO_Y: int = 72
 
 stars: list[Star] = []
 
@@ -65,10 +69,12 @@ for i in range(20):
 display.show(bm)
 
 def update():
-    for star in stars:
-        # Erase at old position
-        bm.plot(star.x, star.y, 0)
+    bm.clear()
 
+    # Blit logo first — minimize time logo area is empty (beam racing)
+    display.blit(logo, LOGO_X, LOGO_Y)
+
+    for star in stars:
         # Scroll left
         star.x = star.x - star.speed
 

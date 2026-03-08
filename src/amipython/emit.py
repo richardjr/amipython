@@ -2,6 +2,7 @@
 
 import ast
 import math
+import re
 
 from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import EmitError
@@ -15,6 +16,15 @@ from amipython.types import (
 )
 
 
+def _rewrite_asset_path(c_str: str) -> str:
+    """Rewrite .png/.iff path to .bm for asset loading in C code.
+
+    Input is a C string literal like '"data/ball.png"'.
+    Returns '"data/ball.bm"'.
+    """
+    return re.sub(r'\.(?:png|iff)"$', '.bm"', c_str)
+
+
 # Map AmipyType to the amipython_print_* function name
 _PRINT_FN_MAP: dict[AmipyType, str] = {
     AmipyType.INT: "amipython_print_long",
@@ -24,17 +34,69 @@ _PRINT_FN_MAP: dict[AmipyType, str] = {
 }
 
 
-def emit(tree: ast.Module, info: TypeInfo) -> str:
+def emit(tree: ast.Module, info: TypeInfo, source_dir: str | None = None) -> str:
     """Emit C89 code from a type-checked AST."""
-    emitter = _Emitter(info)
+    emitter = _Emitter(info, source_dir=source_dir)
     return emitter.emit_module(tree)
 
 
 class _Emitter:
-    def __init__(self, info: TypeInfo):
+    def __init__(self, info: TypeInfo, source_dir: str | None = None):
         self.info = info
         self.indent = 0
         self.lines: list[str] = []
+        self.source_dir = source_dir  # directory of the .py source file
+        self._embedded_counter = 0  # counter for unique embedded data names
+        self._embedded_decls: list[str] = []  # top-level embedded data arrays
+
+    def _embed_shape(self, path_literal: str, var_name: str) -> str | None:
+        """Convert a PNG/IFF at transpile time and return embedded load call.
+
+        Returns a C statement like:
+            amipython_shape_load_embedded(&var, s_assetData0, 192, 56, 3);
+
+        The planar data array is added to self._embedded_decls for emission
+        before main(). Returns None if the image can't be found/converted.
+        """
+        if not self.source_dir:
+            return None
+        # Strip quotes from C string literal: '"data/logo.png"' -> 'data/logo.png'
+        rel_path = path_literal.strip('"')
+        # Try original extension, then swap .bm back to .png/.iff
+        import os
+        for ext in [None, ".png", ".iff"]:
+            if ext is None:
+                full = os.path.join(self.source_dir, rel_path)
+            else:
+                base = os.path.splitext(rel_path)[0]
+                full = os.path.join(self.source_dir, base + ext)
+            if os.path.exists(full):
+                break
+        else:
+            return None
+
+        from amipython.assets import convert_image_to_bytes
+        info = convert_image_to_bytes(full)
+        if info is None:
+            return None
+
+        data_name = f"s_assetData{self._embedded_counter}"
+        self._embedded_counter += 1
+
+        # Build C array declaration
+        lines = [f"static const UBYTE {data_name}[] = {{"]
+        data = info["data"]
+        for i in range(0, len(data), 16):
+            chunk = data[i:i+16]
+            hex_vals = ", ".join(f"0x{b:02X}" for b in chunk)
+            lines.append(f"    {hex_vals},")
+        lines.append("};")
+        self._embedded_decls.append("\n".join(lines))
+
+        w = info["width"]
+        h = info["height"]
+        bp = info["depth"]
+        return f'amipython_shape_load_embedded(&{var_name}, {data_name}, {w}, {h}, {bp});'
 
     def _line(self, text: str = ""):
         if text:
@@ -119,8 +181,23 @@ class _Emitter:
         for func_node in functions:
             self._emit_function(func_node)
 
-        # Emit main
+        # Emit main — this may generate embedded data arrays
         self._emit_main(tree)
+
+        # Insert embedded asset data arrays before function definitions
+        if self._embedded_decls:
+            # Find the insertion point: after global declarations, before functions
+            insert_idx = 0
+            for i, line in enumerate(self.lines):
+                if line.startswith("void ") or line.startswith("int main("):
+                    insert_idx = i
+                    break
+            embedded_lines = []
+            for decl in self._embedded_decls:
+                embedded_lines.extend(decl.split("\n"))
+                embedded_lines.append("")
+            for j, el in enumerate(embedded_lines):
+                self.lines.insert(insert_idx + j, el)
 
         return "\n".join(self.lines) + "\n"
 
@@ -351,6 +428,15 @@ class _Emitter:
                 if method_name in obj_type.static_methods:
                     static = obj_type.static_methods[method_name]
                     args_strs = [self._emit_arg(a) for a in node.value.args]
+                    if method_name == "load" and class_name == "Shape" and args_strs:
+                        # Try embedded approach (convert PNG at transpile time)
+                        embedded = self._embed_shape(args_strs[0], target.id)
+                        if embedded:
+                            self._line(embedded)
+                            return
+                        args_strs = [_rewrite_asset_path(s) for s in args_strs]
+                    elif method_name == "load":
+                        args_strs = [_rewrite_asset_path(s) for s in args_strs]
                     args = ", ".join(args_strs)
                     if args:
                         self._line(f"{static.c_name}(&{target.id}, {args});")
@@ -577,6 +663,8 @@ class _Emitter:
                 and method_name in OBJECT_TYPES[obj_name].static_methods):
             static = OBJECT_TYPES[obj_name].static_methods[method_name]
             args_strs = [self._emit_arg(a) for a in call.args]
+            if method_name == "load":
+                args_strs = [_rewrite_asset_path(s) for s in args_strs]
             args = ", ".join(args_strs)
             self._line(f"{static.c_name}({args});")
             return
@@ -996,6 +1084,8 @@ class _Emitter:
                 and method_name in OBJECT_TYPES[obj_name].static_methods):
             static = OBJECT_TYPES[obj_name].static_methods[method_name]
             args_strs = [self._emit_arg(a) for a in call.args]
+            if method_name == "load":
+                args_strs = [_rewrite_asset_path(s) for s in args_strs]
             args = ", ".join(args_strs)
             return f"{static.c_name}({args})"
 

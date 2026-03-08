@@ -179,7 +179,7 @@ class Ball:
     ys: float
 
 display = Display(320, 200, bitplanes=3, double_buffer=True)
-ball_shape = Shape.load("data/ball")
+ball_shape = Shape.load("data/ball.png")
 balls: list[Ball] = []
 
 for i in range(10):

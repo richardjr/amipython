@@ -8,6 +8,31 @@ import click
 from amipython.errors import AmipythonError
 
 
+def _convert_assets(c_code: str, source_dir: Path, work_dir: Path):
+    """Find asset references in C code and convert source images to .bm format.
+
+    Returns list of (relative_path, absolute_path) tuples for converted assets.
+    """
+    from amipython.assets import collect_asset_paths, convert_image
+
+    bm_paths = collect_asset_paths(c_code)
+    asset_files = []
+    for bm_rel in bm_paths:
+        # Find source image: replace .bm with .png or .iff
+        bm_rel_path = Path(bm_rel)
+        for ext in (".png", ".iff"):
+            source_img = source_dir / bm_rel_path.with_suffix(ext)
+            if source_img.exists():
+                output_subdir = work_dir / bm_rel_path.parent
+                info = convert_image(source_img, output_subdir)
+                asset_files.append((bm_rel, info.bm_path))
+                if info.mask_path:
+                    mask_rel = str(bm_rel_path.with_name(bm_rel_path.stem + "_mask.bm"))
+                    asset_files.append((mask_rel, info.mask_path))
+                break
+    return asset_files
+
+
 @click.group()
 def main():
     """amipython — Python-to-Amiga game development toolchain."""
@@ -62,6 +87,7 @@ def build(source: Path, output: Path | None):
 
     header_dir = _header_dir()
     _copy_runtime(c_file.parent, c_code)
+    _convert_assets(c_code, source.parent, c_file.parent)
 
     try:
         result = cross_compile(c_file, output, header_dir)
@@ -118,6 +144,7 @@ def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label:
 
         header_dir = _header_dir()
         _copy_runtime(c_file.parent, c_code)
+        asset_files = _convert_assets(c_code, source.parent, c_file.parent)
 
         try:
             binary = cross_compile(c_file, binary, header_dir)
@@ -128,12 +155,15 @@ def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label:
     elif not binary.exists():
         click.echo(f"Error: binary not found: {binary}", err=True)
         sys.exit(1)
+    else:
+        asset_files = []
 
     if output is None:
         output = source.with_suffix(".adf")
 
     try:
-        result = create_adf(binary, output, label=label, bootable=not no_boot)
+        result = create_adf(binary, output, label=label, bootable=not no_boot,
+                            asset_files=asset_files)
         click.echo(f"Created {result} ({result.stat().st_size:,} bytes)")
     except AmipythonError as e:
         click.echo(f"Error: {e}", err=True)
@@ -176,6 +206,7 @@ def run(source: Path, output: Path | None, no_build: bool):
 
         header_dir = _header_dir()
         _copy_runtime(c_file.parent, c_code)
+        _convert_assets(c_code, source.parent, c_file.parent)
 
         try:
             output = cross_compile(c_file, output, header_dir)

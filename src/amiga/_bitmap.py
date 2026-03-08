@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
+
 from amiga._backend import Backend, _require_pygame
 
 try:
@@ -72,6 +75,45 @@ class Bitmap:
                             else:
                                 self._surface.set_at((bx, by), 0)
             cx += 8
+
+    @staticmethod
+    def load(path: str) -> Bitmap:
+        """Load a bitmap from a PNG or IFF file, including palette.
+
+        Extracts the image palette and applies it via palette.set() calls.
+        Path is resolved relative to the calling script's directory.
+        """
+        from amiga._palette import palette
+
+        _require_pygame()
+        caller_dir = Path(inspect.stack()[1].filename).parent
+        full_path = caller_dir / path
+        image = pygame.image.load(str(full_path))
+        surface = image.convert(8)
+        w, h = surface.get_size()
+        # Determine bitplanes from palette
+        pal = image.get_palette()
+        if pal is not None:
+            n_colors = len(pal)
+        else:
+            n_colors = 256
+        depth = 1
+        while (1 << depth) < n_colors:
+            depth += 1
+        if depth > 5:
+            depth = 5
+        bm = Bitmap.__new__(Bitmap)
+        bm.width = w
+        bm.height = h
+        bm.bitplanes = depth
+        bm._max_colors = 1 << depth
+        bm._surface = surface
+        Backend.get().register_surface(surface)
+        # Apply palette from loaded image
+        if pal is not None:
+            for i, (r, g, b) in enumerate(pal[:bm._max_colors]):
+                palette.set(i, r >> 4, g >> 4, b >> 4)
+        return bm
 
 
 # Minimal 8x8 bitmap font — printable ASCII subset

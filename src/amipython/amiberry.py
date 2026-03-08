@@ -239,9 +239,9 @@ def launch_amiberry(binary: Path) -> None:
     binary_dir = binary.parent
     binary_name = binary.name
 
-    # Write startup-sequence that runs this specific binary
+    # Write startup-sequence that CDs to binary dir and runs the binary
     startup = _BOOT_DIR / "S" / "Startup-Sequence"
-    startup.write_text(f"Run:{binary_name}\n")
+    startup.write_text(f"CD Run:\n{binary_name}\n")
 
     uae_content = _generate_uae(binary_dir, binary_name, _BOOT_DIR)
     _launch(uae_content)

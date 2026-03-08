@@ -71,6 +71,28 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
     printf("[shape] grab %ldx%ld from %ux%u at %ld,%ld\n", w, h, bm->width, bm->height, x, y);
 }
 
+void amipython_shape_load(AmipyShape *shape, const char *path) {
+    shape->width = 16;
+    shape->height = 16;
+    shape->data = NULL;
+    printf("[shape] load \"%s\"\n", path);
+}
+
+void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    shape->width = (UWORD)w;
+    shape->height = (UWORD)h;
+    shape->data = NULL;
+    printf("[shape] load_embedded %ldx%ldx%ld\n", w, h, bp);
+    (void)data;
+}
+
+void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
+    bm->width = 320;
+    bm->height = 200;
+    bm->bitplanes = 5;
+    printf("[bitmap] load \"%s\"\n", path);
+}
+
 BOOL amipython_joy_button(LONG port) {
     s_joy_button_count++;
     printf("[input] joy_button port=%ld\n", port);

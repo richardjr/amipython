@@ -102,6 +102,9 @@ void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LON
 void amipython_bitmap_clear(AmipyBitmap *bm);
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color);
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
+void amipython_shape_load(AmipyShape *shape, const char *path);
+void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w, LONG h, LONG bp);
+void amipython_bitmap_load(AmipyBitmap *bm, const char *path);
 void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b);
 void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b);
 BOOL amipython_joy_button(LONG port);

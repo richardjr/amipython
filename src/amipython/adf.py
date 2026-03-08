@@ -29,6 +29,7 @@ def create_adf(
     output: Path,
     label: str | None = None,
     bootable: bool = True,
+    asset_files: list[tuple[str, Path]] | None = None,
 ) -> Path:
     """Create an ADF floppy image containing the compiled game binary.
 
@@ -37,6 +38,7 @@ def create_adf(
         output: Path for the output .adf file.
         label: Volume label (default: binary stem).
         bootable: If True, write a standard AmigaDOS boot block.
+        asset_files: List of (relative_path, absolute_path) tuples for data files.
 
     Returns:
         Path to the created ADF file.
@@ -46,10 +48,13 @@ def create_adf(
     if not binary.exists():
         raise BuildError(f"Binary not found: {binary}")
 
-    size = binary.stat().st_size
-    if size > ADF_USABLE:
+    total_size = binary.stat().st_size
+    if asset_files:
+        for _, abs_path in asset_files:
+            total_size += abs_path.stat().st_size
+    if total_size > ADF_USABLE:
         raise BuildError(
-            f"Binary too large for ADF: {size:,} bytes "
+            f"Binary + assets too large for ADF: {total_size:,} bytes "
             f"(max ~{ADF_USABLE:,} bytes)"
         )
 
@@ -67,7 +72,7 @@ def create_adf(
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", prefix="startup_", delete=False
     ) as f:
-        f.write(f"C:{binary_name}\n")
+        f.write(f"CD DF0:\nC:{binary_name}\n")
         startup_path = Path(f.name)
 
     try:
@@ -86,6 +91,19 @@ def create_adf(
             "+", "write", str(startup_path), "S/Startup-Sequence",
             "+", "write", str(binary), f"C/{binary_name}",
         ]
+
+        # Add asset data files
+        if asset_files:
+            created_dirs = set()
+            for rel_path, abs_path in asset_files:
+                # Create subdirectories as needed
+                parts = Path(rel_path).parts
+                for i in range(len(parts) - 1):
+                    subdir = "/".join(parts[:i + 1])
+                    if subdir not in created_dirs:
+                        chain += ["+", "makedir", subdir]
+                        created_dirs.add(subdir)
+                chain += ["+", "write", str(abs_path), rel_path]
 
         result = subprocess.run(
             chain, capture_output=True, text=True, timeout=30,

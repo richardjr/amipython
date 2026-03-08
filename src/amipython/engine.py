@@ -180,6 +180,14 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 keywords={"color": (AmipyType.INT, 1)},
             ),
         },
+        static_methods={
+            "load": EngineStaticMethod(
+                name="load",
+                c_name="amipython_bitmap_load",
+                params=[EngineParam("path", AmipyType.STR)],
+                return_type=AmipyType.BITMAP,
+            ),
+        },
     ),
     "Shape": EngineObjectType(
         python_name="Shape",
@@ -198,6 +206,12 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                     EngineParam("w", AmipyType.INT),
                     EngineParam("h", AmipyType.INT),
                 ],
+                return_type=AmipyType.SHAPE,
+            ),
+            "load": EngineStaticMethod(
+                name="load",
+                c_name="amipython_shape_load",
+                params=[EngineParam("path", AmipyType.STR)],
                 return_type=AmipyType.SHAPE,
             ),
         },

@@ -367,6 +367,74 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
     }
 }
 
+/* Try to open an asset file, attempting multiple path strategies.
+ * 1. Raw relative path (relies on CD in startup-sequence)
+ * 2. PROGDIR: prefix (binary's directory, KS 2.0+)
+ * Returns the loaded bitmap, or 0 on failure. */
+static char s_pathBuf[128];
+
+static tBitMap *_loadBitmapAsset(const char *path) {
+    tBitMap *pBm;
+    const char *src;
+    char *dst;
+
+    /* Try raw path first (works when CD is set correctly) */
+    pBm = bitmapCreateFromPath(path, 0);
+    if (pBm) return pBm;
+
+    /* Try PROGDIR: prefix (binary's own directory) */
+    dst = s_pathBuf;
+    for (src = "PROGDIR:"; *src; ) *dst++ = *src++;
+    for (src = path; *src; ) *dst++ = *src++;
+    *dst = 0;
+    pBm = bitmapCreateFromPath(s_pathBuf, 0);
+    if (pBm) return pBm;
+
+    /* Try Run: prefix (Amiberry virtual FS volume) */
+    dst = s_pathBuf;
+    for (src = "Run:"; *src; ) *dst++ = *src++;
+    for (src = path; *src; ) *dst++ = *src++;
+    *dst = 0;
+    return bitmapCreateFromPath(s_pathBuf, 0);
+}
+
+void amipython_shape_load(AmipyShape *shape, const char *path) {
+    tBitMap *pBm = _loadBitmapAsset(path);
+    if (pBm) {
+        shape->width = bitmapGetByteWidth(pBm) * 8;
+        shape->height = pBm->Rows;
+        shape->bitplanes = pBm->Depth;
+        shape->pBitmap = pBm;
+    }
+}
+
+void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    UBYTE i;
+    UWORD bytesPerRow = (UWORD)(w / 8);
+    ULONG planeSize = (ULONG)bytesPerRow * (ULONG)h;
+    tBitMap *pBm = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, 0);
+    if (pBm) {
+        for (i = 0; i < (UBYTE)bp; i++) {
+            CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
+        }
+        shape->width = (UWORD)w;
+        shape->height = (UWORD)h;
+        shape->bitplanes = (UBYTE)bp;
+        shape->pBitmap = pBm;
+    }
+}
+
+void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
+    tBitMap *pBm = _loadBitmapAsset(path);
+    if (pBm) {
+        bm->width = bitmapGetByteWidth(pBm) * 8;
+        bm->height = pBm->Rows;
+        bm->bitplanes = pBm->Depth;
+        bm->pBitmap = pBm;
+        _dirtyReset(bm);
+    }
+}
+
 static UWORD s_uwJoyIgnoreCount = 10;  /* ignore first 10 frames (Amiberry LMB quirk) */
 
 BOOL amipython_joy_button(LONG port) {
@@ -835,6 +903,38 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
     amipython_print_long(h);
     amipython_print_str("\n");
     (void)bm; (void)x; (void)y;
+}
+
+void amipython_shape_load(AmipyShape *shape, const char *path) {
+    shape->width = 16;
+    shape->height = 16;
+    shape->data = 0;
+    amipython_print_str("[shape] load ");
+    amipython_print_str(path);
+    amipython_print_str("\n");
+}
+
+void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    shape->width = (UWORD)w;
+    shape->height = (UWORD)h;
+    shape->data = 0;
+    amipython_print_str("[shape] load_embedded ");
+    _print_uword((UWORD)w);
+    amipython_print_str("x");
+    _print_uword((UWORD)h);
+    amipython_print_str("x");
+    _print_uword((UWORD)bp);
+    amipython_print_str("\n");
+    (void)data;
+}
+
+void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
+    bm->width = 320;
+    bm->height = 200;
+    bm->bitplanes = 5;
+    amipython_print_str("[bitmap] load ");
+    amipython_print_str(path);
+    amipython_print_str("\n");
 }
 
 BOOL amipython_joy_button(LONG port) {

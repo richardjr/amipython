@@ -17,15 +17,15 @@ class Ball:
     ys: float
 
 display = Display(320, 200, bitplanes=3)
-ball_shape = Shape.load("data/ball")
+ball_shape = Shape.load("data/ball.png")
 
 balls: list[Ball] = []
 for i in range(10):
     balls.append(Ball(
         x=rnd(280) + 10,
         y=rnd(160) + 10,
-        xs=(rnd() - 0.5) * 8,
-        ys=(rnd() - 0.5) * 8,
+        xs=(rnd(100) / 100.0 - 0.5) * 8,
+        ys=(rnd(100) / 100.0 - 0.5) * 8,
     ))
 
 def update():

@@ -20,4 +20,7 @@ def transpile(source: str, filename: str = "<string>") -> str:
         raise errors[0]
 
     info = typecheck(tree)
-    return emit(tree, info)
+    # Pass source directory so emitter can resolve relative asset paths
+    import os
+    source_dir = os.path.dirname(os.path.abspath(filename)) if filename != "<string>" else None
+    return emit(tree, info, source_dir=source_dir)

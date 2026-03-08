@@ -196,12 +196,16 @@ bm.clear()                              # fill with colour 0
 
 ### Shapes (Blittable Graphics)
 
-Shapes are rectangular graphics grabbed from a bitmap and blitted onto the display:
+Shapes are rectangular graphics grabbed from a bitmap or loaded from image files:
 
 ```python
+# Procedural: draw then grab
 bm.circle_filled(8, 8, 7, 1)           # draw on the display bitmap
 ball = Shape.grab(bm, 0, 0, 16, 16)    # grab the region as a shape
 bm.clear()                              # clear the source drawing
+
+# From file: load a PNG or IFF image
+ball = Shape.load("data/ball.png")      # PNG converted to .bm at build time
 
 display.blit(ball, x, y)               # blit the shape at runtime
 ```
@@ -210,7 +214,21 @@ Shape rules:
 - Draw the shape on the **display bitmap** (`bm`), not a separate small bitmap
 - Shape width is automatically rounded up to a multiple of 16 (blitter word alignment)
 - Use `display.blit(shape, x, y)` to draw — coordinates must keep the shape within screen bounds
-- No direct constructor — shapes are created only via `Shape.grab()`
+- `Shape.load()` accepts `.png` or `.iff` files — converted to ACE `.bm` format at build time
+- Color index 0 in loaded images is treated as transparent (mask auto-generated)
+
+### Loading Bitmaps from Files
+
+Full bitmaps can be loaded from image files with palette auto-extraction:
+
+```python
+bg = Bitmap.load("data/background.png")  # palette applied automatically
+display.show(bg)
+```
+
+- Palette is extracted from the image and applied via `palette.set()` calls
+- Supports PNG (indexed) and IFF ILBM formats
+- Images are converted to ACE `.bm` format at build time (zero runtime overhead)
 
 ### Engine Modules
 

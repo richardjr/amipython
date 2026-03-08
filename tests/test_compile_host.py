@@ -434,3 +434,17 @@ wait_mouse()
         assert "[bitmap] circle_filled 160,128 r=0 color=1" in output
         assert "[display] show 320x256 on 320x256" in output
         assert "[input] wait_mouse" in output
+
+    def test_shape_load(self):
+        output = _compile_and_run('''
+from amiga import Shape
+s = Shape.load("data/ball.bm")
+''')
+        assert '[shape] load "data/ball.bm"' in output
+
+    def test_bitmap_load(self):
+        output = _compile_and_run('''
+from amiga import Bitmap
+bm = Bitmap.load("levels/bg.bm")
+''')
+        assert '[bitmap] load "levels/bg.bm"' in output
