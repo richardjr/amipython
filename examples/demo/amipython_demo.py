@@ -5,6 +5,7 @@
 # Three depth layers with different speeds and brightness.
 # Uses 3 bitplanes (8 colours) for star brightness variation.
 # Loads an amipython logo PNG and blits it over the starfield.
+# Graphic equaliser at bottom-left using sprite sheet pattern.
 
 from dataclasses import dataclass
 from amiga import Display, Bitmap, Shape, palette, joy, music, rnd, run
@@ -16,10 +17,19 @@ class Star:
     speed: int
     color: int
 
+@dataclass
+class Bar:
+    level: int
+    target: int
+
 music.load("data/demo.mod")
 
 SCREEN_W: int = 320
 SCREEN_H: int = 200
+NUM_BARS: int = 8
+NUM_LEVELS: int = 9
+BAR_W: int = 16
+BAR_H: int = 32
 
 display = Display(SCREEN_W, SCREEN_H, bitplanes=3)
 bm = Bitmap(SCREEN_W, SCREEN_H, bitplanes=3)
@@ -38,6 +48,20 @@ palette.set(7, 15, 15, 15)
 logo = Shape.load("data/logo.png")
 LOGO_X: int = 64
 LOGO_Y: int = 72
+
+# Load EQ sprite sheet — 9 frames of bar at different heights
+eq_sheet = Bitmap.load("data/eq_bars.png")
+eq_bars: list[Shape] = []
+for i in range(NUM_LEVELS):
+    eq_bars.append(Shape.grab(eq_sheet, i * BAR_W, 0, BAR_W, BAR_H))
+
+# EQ position — bottom left
+EQ_X: int = 100 
+EQ_Y: int = SCREEN_H - BAR_H - 8
+
+eq: list[Bar] = []
+for i in range(NUM_BARS):
+    eq.append(Bar(level=0, target=0))
 
 stars: list[Star] = []
 
@@ -68,10 +92,14 @@ for i in range(20):
         color=rnd(3) + 5,
     ))
 
+frame: int = 0
+
 display.show(bm)
 music.play()
 
 def update():
+    global frame
+    frame = frame + 1
     bm.clear()
 
     # Blit logo first — minimize time logo area is empty (beam racing)
@@ -88,6 +116,20 @@ def update():
 
         # Draw at new position
         bm.plot(star.x, star.y, star.color)
+
+    # Graphic equaliser — random targets with smoothing
+    if frame % 6 == 0:
+        for b in eq:
+            b.target = rnd(NUM_LEVELS)
+
+    for b in eq:
+        if b.level < b.target:
+            b.level = b.level + 1
+        if b.level > b.target:
+            b.level = b.level - 1
+
+    for i in range(NUM_BARS):
+        display.blit(eq_bars[eq[i].level], EQ_X + i * BAR_W, EQ_Y)
 
 run(update, until=lambda: joy.button(0))
 music.stop()

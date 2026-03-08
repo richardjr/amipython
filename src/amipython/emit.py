@@ -98,6 +98,51 @@ class _Emitter:
         bp = info["depth"]
         return f'amipython_shape_load_embedded(&{var_name}, {data_name}, {w}, {h}, {bp});'
 
+    def _embed_bitmap(self, path_literal: str, var_name: str) -> str | None:
+        """Convert a PNG/IFF at transpile time and return embedded bitmap load call.
+
+        Returns a C statement like:
+            amipython_bitmap_load_embedded(&var, s_assetData0, 144, 32, 3);
+
+        Same as _embed_shape but for Bitmap objects.
+        """
+        if not self.source_dir:
+            return None
+        rel_path = path_literal.strip('"')
+        import os
+        for ext in [None, ".png", ".iff"]:
+            if ext is None:
+                full = os.path.join(self.source_dir, rel_path)
+            else:
+                base = os.path.splitext(rel_path)[0]
+                full = os.path.join(self.source_dir, base + ext)
+            if os.path.exists(full):
+                break
+        else:
+            return None
+
+        from amipython.assets import convert_image_to_bytes
+        info = convert_image_to_bytes(full)
+        if info is None:
+            return None
+
+        data_name = f"s_assetData{self._embedded_counter}"
+        self._embedded_counter += 1
+
+        lines = [f"static const UBYTE {data_name}[] = {{"]
+        data = info["data"]
+        for i in range(0, len(data), 16):
+            chunk = data[i:i+16]
+            hex_vals = ", ".join(f"0x{b:02X}" for b in chunk)
+            lines.append(f"    {hex_vals},")
+        lines.append("};")
+        self._embedded_decls.append("\n".join(lines))
+
+        w = info["width"]
+        h = info["height"]
+        bp = info["depth"]
+        return f'amipython_bitmap_load_embedded(&{var_name}, {data_name}, {w}, {h}, {bp});'
+
     def _embed_music(self, path_literal: str) -> str | None:
         """Embed a MOD file at transpile time and return the load call.
 
@@ -313,6 +358,9 @@ class _Emitter:
                 self._line(f"{var.struct_name} {name};")
         elif var.type == AmipyType.LIST:
             self._emit_list_decl(name, var)
+        elif var.is_ref and self._is_engine_object_type(var.type):
+            c_type = C_TYPE_MAP[var.type]
+            self._line(f"{c_type} *{name};")
         else:
             self._line(f"{self._var_decl(var.type, name)};")
 
@@ -466,6 +514,13 @@ class _Emitter:
                     if method_name == "load" and class_name == "Shape" and args_strs:
                         # Try embedded approach (convert PNG at transpile time)
                         embedded = self._embed_shape(args_strs[0], target.id)
+                        if embedded:
+                            self._line(embedded)
+                            return
+                        args_strs = [_rewrite_asset_path(s) for s in args_strs]
+                    elif method_name == "load" and class_name == "Bitmap" and args_strs:
+                        # Try embedded approach for Bitmap.load too
+                        embedded = self._embed_bitmap(args_strs[0], target.id)
                         if embedded:
                             self._line(embedded)
                             return
@@ -632,7 +687,12 @@ class _Emitter:
         """Emit a field access target, using -> for refs and . for values.
 
         Module properties (e.g. mouse.x) emit as C getter function calls.
+        Supports subscript targets: eq[i].level -> eq_items[i].level
         """
+        if isinstance(node.value, ast.Subscript):
+            # e.g. eq[i].level -> eq_items[i].level
+            sub = self._emit_subscript(node.value)
+            return f"{sub}.{node.attr}"
         if not isinstance(node.value, ast.Name):
             raise EmitError("unsupported field target", lineno=node.lineno)
         name = node.value.id
@@ -771,6 +831,44 @@ class _Emitter:
                             f"{default_val};"
                         )
                 self._line(f"{list_name}_count++;")
+            elif (isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Attribute)
+                    and isinstance(arg.func.value, ast.Name)
+                    and arg.func.value.id in OBJECT_TYPES
+                    and arg.func.value.id in self.info.engine_imports):
+                # Static method returning engine type into list slot:
+                # e.g. eq_bars.append(Shape.grab(sheet, x, y, w, h))
+                # -> amipython_shape_grab(&eq_bars_items[eq_bars_count], &sheet, x, y, w, h);
+                class_name = arg.func.value.id
+                method_name_s = arg.func.attr
+                obj_type = OBJECT_TYPES[class_name]
+                if method_name_s in obj_type.static_methods:
+                    static = obj_type.static_methods[method_name_s]
+                    args_strs = [self._emit_arg(a) for a in arg.args]
+                    if method_name_s == "load" and class_name == "Shape" and args_strs:
+                        embedded = self._embed_shape(
+                            args_strs[0],
+                            f"{list_name}_items[{list_name}_count]",
+                        )
+                        if embedded:
+                            self._line(embedded)
+                            self._line(f"{list_name}_count++;")
+                            return
+                        args_strs = [_rewrite_asset_path(s) for s in args_strs]
+                    elif method_name_s == "load":
+                        args_strs = [_rewrite_asset_path(s) for s in args_strs]
+                    args = ", ".join(args_strs)
+                    slot = f"&{list_name}_items[{list_name}_count]"
+                    if args:
+                        self._line(f"{static.c_name}({slot}, {args});")
+                    else:
+                        self._line(f"{static.c_name}({slot});")
+                    self._line(f"{list_name}_count++;")
+                else:
+                    raise EmitError(
+                        f"'{class_name}.{method_name_s}' is not a static method",
+                        lineno=call.lineno,
+                    )
             else:
                 val = self._emit_expr(arg)
                 self._line(f"{list_name}_items[{list_name}_count] = {val};")
@@ -876,7 +974,9 @@ class _Emitter:
             list_var = self._get_var_info(list_name)
             if list_var and list_var.type == AmipyType.LIST:
                 idx = f"{var}_idx"
-                if list_var.list_element_type == AmipyType.STRUCT:
+                use_ref = (list_var.list_element_type == AmipyType.STRUCT
+                           or self._is_engine_object_type(list_var.list_element_type))
+                if use_ref:
                     self._line(f"for ({idx} = 0; {idx} < {list_name}_count; {idx}++) {{")
                     self.indent += 1
                     self._line(f"{var} = &{list_name}_items[{idx}];")

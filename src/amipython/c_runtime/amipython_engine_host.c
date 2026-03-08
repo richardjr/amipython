@@ -93,6 +93,14 @@ void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
     printf("[bitmap] load \"%s\"\n", path);
 }
 
+void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    bm->width = (UWORD)w;
+    bm->height = (UWORD)h;
+    bm->bitplanes = (UBYTE)bp;
+    printf("[bitmap] load_embedded %ldx%ldx%ld\n", w, h, bp);
+    (void)data;
+}
+
 BOOL amipython_joy_button(LONG port) {
     s_joy_button_count++;
     printf("[input] joy_button port=%ld\n", port);

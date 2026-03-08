@@ -444,6 +444,23 @@ void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
     }
 }
 
+void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    UBYTE i;
+    UWORD bytesPerRow = (UWORD)(w / 8);
+    ULONG planeSize = (ULONG)bytesPerRow * (ULONG)h;
+    tBitMap *pBm = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, 0);
+    if (pBm) {
+        for (i = 0; i < (UBYTE)bp; i++) {
+            CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
+        }
+        bm->width = (UWORD)w;
+        bm->height = (UWORD)h;
+        bm->bitplanes = (UBYTE)bp;
+        bm->pBitmap = pBm;
+        _dirtyReset(bm);
+    }
+}
+
 static UWORD s_uwJoyIgnoreCount = 10;  /* ignore first 10 frames (Amiberry LMB quirk) */
 
 BOOL amipython_joy_button(LONG port) {
@@ -1061,6 +1078,20 @@ void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
     amipython_print_str("[bitmap] load ");
     amipython_print_str(path);
     amipython_print_str("\n");
+}
+
+void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, LONG h, LONG bp) {
+    bm->width = (UWORD)w;
+    bm->height = (UWORD)h;
+    bm->bitplanes = (UBYTE)bp;
+    amipython_print_str("[bitmap] load_embedded ");
+    amipython_print_long(w);
+    amipython_print_str("x");
+    amipython_print_long(h);
+    amipython_print_str("x");
+    amipython_print_long(bp);
+    amipython_print_str("\n");
+    (void)data;
 }
 
 BOOL amipython_joy_button(LONG port) {

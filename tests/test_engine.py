@@ -426,3 +426,60 @@ class TestMusicModule:
             assert "amipython_music_load_embedded(s_modData0, s_modSize0);" in c
             # Should NOT have the regular load call
             assert 'amipython_music_load("data/song.mod")' not in c
+
+
+class TestListOfEngineTypes:
+    """Test list[Shape] and other engine type lists."""
+
+    def test_list_shape_typecheck(self):
+        _typecheck(
+            "from amiga import Bitmap, Shape\n"
+            "sheet: Bitmap = Bitmap(320, 200, bitplanes=3)\n"
+            "shapes: list[Shape] = []\n"
+        )
+
+    def test_list_shape_emit_declaration(self):
+        c = _emit(
+            "from amiga import Bitmap, Shape\n"
+            "shapes: list[Shape] = []\n"
+        )
+        assert "AmipyShape shapes_items[64];" in c
+        assert "LONG shapes_count = 0;" in c
+
+    def test_list_shape_append_static_method(self):
+        c = _emit(
+            "from amiga import Bitmap, Shape\n"
+            "bm: Bitmap = Bitmap(320, 200, bitplanes=3)\n"
+            "shapes: list[Shape] = []\n"
+            "shapes.append(Shape.grab(bm, 0, 0, 16, 16))\n"
+        )
+        assert "amipython_shape_grab(&shapes_items[shapes_count], &bm, 0, 0, 16, 16);" in c
+        assert "shapes_count++;" in c
+
+    def test_list_shape_subscript_access(self):
+        c = _emit(
+            "from amiga import Display, Bitmap, Shape\n"
+            "display: Display = Display(320, 200, bitplanes=3)\n"
+            "bm: Bitmap = Bitmap(320, 200, bitplanes=3)\n"
+            "shapes: list[Shape] = []\n"
+            "i: int = 0\n"
+            "display.blit(shapes[i], 0, 0)\n"
+        )
+        assert "&shapes_items[i]" in c
+
+    def test_subscript_field_access(self):
+        """Test eq[i].level pattern — field access on list subscript."""
+        c = _emit(
+            "from dataclasses import dataclass\n"
+            "from amiga import Display, Bitmap, Shape\n"
+            "@dataclass\n"
+            "class Bar:\n"
+            "    level: int\n"
+            "bars: list[Bar] = []\n"
+            "shapes: list[Shape] = []\n"
+            "display: Display = Display(320, 200, bitplanes=3)\n"
+            "bm: Bitmap = Bitmap(320, 200, bitplanes=3)\n"
+            "i: int = 0\n"
+            "display.blit(shapes[bars[i].level], 0, 0)\n"
+        )
+        assert "shapes_items[bars_items[i].level]" in c

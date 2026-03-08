@@ -28,7 +28,7 @@ amipython is not full Python. It is a restricted subset sufficient for game logi
 | `bool` | `BOOL` | 0 or 1 |
 | `str` | `const char *` | Immutable literals only |
 | `@dataclass class` | `typedef struct` | Fields: int, float, bool only. No methods, no inheritance |
-| `list[T]` | Fixed-capacity array | Max 64 elements. T can be int, float, bool, or dataclass |
+| `list[T]` | Fixed-capacity array | Max 64 elements. T can be int, float, bool, dataclass, or engine type (Shape, Bitmap, etc.) |
 
 ## Supported Python Builtins
 
@@ -216,6 +216,24 @@ Shape rules:
 - Use `display.blit(shape, x, y)` to draw — coordinates must keep the shape within screen bounds
 - `Shape.load()` accepts `.png` or `.iff` files — converted to ACE `.bm` format at build time
 - Color index 0 in loaded images is treated as transparent (mask auto-generated)
+
+### Sprite Sheets
+
+Load a single image and grab multiple shapes from it:
+
+```python
+from amiga import Bitmap, Shape
+
+sheet = Bitmap.load("data/eq_bars.png")    # 144x32 sprite sheet
+bars: list[Shape] = []
+for i in range(9):
+    bars.append(Shape.grab(sheet, i * 16, 0, 16, 32))
+
+# Use individual frames:
+display.blit(bars[frame_index], x, y)
+```
+
+`list[Shape]` supports all standard list operations. Engine types (Shape, Bitmap, etc.) can be used as list element types alongside int, float, bool, and dataclass types.
 
 ### Loading Bitmaps from Files
 

@@ -40,6 +40,8 @@ def _resolve_annotation(
     if isinstance(node, ast.Name):
         if node.id in ANNOTATION_MAP:
             return ANNOTATION_MAP[node.id], None, None, None
+        if node.id in ENGINE_TYPE_MAP:
+            return ENGINE_TYPE_MAP[node.id], None, None, None
         if structs and node.id in structs:
             return AmipyType.STRUCT, node.id, None, None
     if isinstance(node, ast.Subscript):
@@ -863,6 +865,23 @@ class _TypeChecker(ast.NodeVisitor):
                     return mod.properties[node.attr].type
                 raise TypeCheckError(
                     f"module '{name}' has no property '{node.attr}'",
+                    lineno=node.lineno,
+                )
+        # Attribute on subscript: eq[i].level — list[Struct][idx].field
+        if isinstance(node.value, ast.Subscript):
+            elem_type = self._infer_subscript(node.value)
+            if elem_type == AmipyType.STRUCT:
+                # Find struct name from list var
+                if isinstance(node.value.value, ast.Name):
+                    list_var = self._get_var(node.value.value.id, lineno=node.lineno)
+                    if list_var and list_var.list_element_struct:
+                        struct = self.info.structs.get(list_var.list_element_struct)
+                        if struct:
+                            for f in struct.fields:
+                                if f.name == node.attr:
+                                    return f.type
+                raise TypeCheckError(
+                    f"cannot resolve field '{node.attr}' on subscript expression",
                     lineno=node.lineno,
                 )
         raise TypeCheckError(
