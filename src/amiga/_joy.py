@@ -1,4 +1,4 @@
-"""Joy module — joystick/mouse button input."""
+"""Joy module — joystick/mouse button and direction input."""
 
 from __future__ import annotations
 
@@ -30,6 +30,30 @@ class _JoyModule:
                 joy = pygame.joystick.Joystick(0)
                 return joy.get_button(0)
         return False
+
+    def left(self) -> bool:
+        if pygame is None:
+            return False
+        Backend.get().pump_events()
+        return pygame.key.get_pressed()[pygame.K_LEFT]
+
+    def right(self) -> bool:
+        if pygame is None:
+            return False
+        Backend.get().pump_events()
+        return pygame.key.get_pressed()[pygame.K_RIGHT]
+
+    def up(self) -> bool:
+        if pygame is None:
+            return False
+        Backend.get().pump_events()
+        return pygame.key.get_pressed()[pygame.K_UP]
+
+    def down(self) -> bool:
+        if pygame is None:
+            return False
+        Backend.get().pump_events()
+        return pygame.key.get_pressed()[pygame.K_DOWN]
 
 
 joy = _JoyModule()

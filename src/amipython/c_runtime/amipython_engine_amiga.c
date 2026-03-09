@@ -21,6 +21,8 @@
 #include <ace/managers/mouse.h>
 #include <ace/managers/ptplayer.h>
 #include <ace/managers/viewport/simplebuffer.h>
+#include <ace/managers/viewport/tilebuffer.h>
+#include <ace/managers/joy.h>
 #include <ace/utils/extview.h>
 #include <ace/utils/bitmap.h>
 #include <ace/utils/chunky.h>
@@ -29,6 +31,7 @@
 /* Global ACE state — the display that's currently active */
 static AmipyDisplay *s_pActiveDisplay = 0;
 static AmipyBitmap *s_pActiveBitmap = 0;  /* user bitmap linked via show() */
+static AmipyTilemap *s_pActiveTilemap = 0;
 static tPtplayerMod *s_pMod = 0;
 
 /* Palette buffer — stores colors set before display.show() */
@@ -45,6 +48,7 @@ void amipython_engine_create(void) {
     blitManagerCreate();
     copCreate();
     mouseCreate(MOUSE_PORT_1);
+    joyOpen();
     ptplayerCreate(1);  /* 1 = PAL */
 }
 
@@ -55,7 +59,18 @@ void amipython_engine_destroy(void) {
         s_pMod = 0;
     }
     ptplayerDestroy();
-    if (s_pActiveDisplay && s_pActiveDisplay->pView) {
+    if (s_pActiveTilemap && s_pActiveTilemap->pView) {
+        viewLoad(0);
+        systemUse();
+        if (s_pActiveTilemap->pTilesetBitmap) {
+            bitmapDestroy(s_pActiveTilemap->pTilesetBitmap);
+            s_pActiveTilemap->pTilesetBitmap = 0;
+        }
+        viewDestroy(s_pActiveTilemap->pView);
+        s_pActiveTilemap->pView = 0;
+        s_pActiveTilemap->pVPort = 0;
+        s_pActiveTilemap->pTileBfr = 0;
+    } else if (s_pActiveDisplay && s_pActiveDisplay->pView) {
         viewLoad(0);
         systemUse();
         /* User bitmap was redirected to pBfr->pBack in display_show.
@@ -68,6 +83,7 @@ void amipython_engine_destroy(void) {
         s_pActiveDisplay->pVPort = 0;
         s_pActiveDisplay->pBfr = 0;
     }
+    joyClose();
     mouseDestroy();
     copDestroy();
     blitManagerDestroy();
@@ -351,6 +367,7 @@ void amipython_vwait(LONG n) {
     LONG i;
     if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
         for (i = 0; i < n; i++) {
+            joyProcess();
             blitWait();
             vPortWaitForEnd(s_pActiveDisplay->pVPort);
         }
@@ -907,6 +924,193 @@ void amipython_music_volume(LONG vol) {
     ptplayerSetMasterVolume(v);
 }
 
+/* --- Joy directions (ACE joy manager) --- */
+
+BOOL amipython_joy_left(void) {
+    return joyCheck(JOY2_LEFT) ? TRUE : FALSE;
+}
+
+BOOL amipython_joy_right(void) {
+    return joyCheck(JOY2_RIGHT) ? TRUE : FALSE;
+}
+
+BOOL amipython_joy_up(void) {
+    return joyCheck(JOY2_UP) ? TRUE : FALSE;
+}
+
+BOOL amipython_joy_down(void) {
+    return joyCheck(JOY2_DOWN) ? TRUE : FALSE;
+}
+
+/* --- Tilemap (ACE tileBuffer) --- */
+
+static void _onTileDraw(UWORD uwTileX, UWORD uwTileY,
+                         tBitMap *pBitMap, UWORD uwBitmapX, UWORD uwBitmapY) {
+    tTileBufferManager *pTileBfr;
+    UBYTE ubTile;
+    UWORD tileSize;
+    if (!s_pActiveTilemap || !s_pActiveTilemap->pTileBfr) return;
+    pTileBfr = (tTileBufferManager *)s_pActiveTilemap->pTileBfr;
+    ubTile = pTileBfr->pTileData[uwTileX][uwTileY];
+    tileSize = (UWORD)(1 << s_pActiveTilemap->tileShift);
+    blitCopy(s_pActiveTilemap->pTilesetBitmap, 0, (UWORD)(ubTile * tileSize),
+             pBitMap, uwBitmapX, uwBitmapY,
+             tileSize, tileSize, MINTERM_COOKIE);
+}
+
+
+static UBYTE _tileShiftFromSize(LONG tile_size) {
+    UBYTE shift = 0;
+    LONG v = tile_size;
+    while (v > 1) { v >>= 1; shift++; }
+    return shift;
+}
+
+
+void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
+    LONG ts_w, LONG ts_h, LONG ts_bp,
+    LONG w, LONG h, LONG bp, LONG tile_size, LONG map_w, LONG map_h) {
+    UBYTE i;
+    UWORD bytesPerRow;
+    ULONG planeSize;
+    tBitMap *pTsBm;
+
+    tm->width = (UWORD)w;
+    tm->height = (UWORD)h;
+    tm->bitplanes = (UBYTE)bp;
+    tm->tileShift = _tileShiftFromSize(tile_size);
+    tm->mapW = (UWORD)map_w;
+    tm->mapH = (UWORD)map_h;
+    tm->pView = 0;
+    tm->pVPort = 0;
+    tm->pTileBfr = 0;
+    tm->pCamera = 0;
+
+    /* Allocate shadow tile buffer for set_tile calls before show() */
+    {
+        ULONG shadowSize = (ULONG)map_w * (ULONG)map_h;
+        UBYTE *pShadow = (UBYTE *)memAllocFast(shadowSize);
+        ULONG j;
+        if (pShadow) {
+            for (j = 0; j < shadowSize; j++) pShadow[j] = 0;
+        }
+        tm->pShadowTiles = pShadow;
+    }
+
+    /* Create tileset bitmap from embedded data.
+     * Embedded data is non-interleaved (plane 0 complete, plane 1 complete, ...).
+     * Create as interleaved to match the scroll buffer — copy row-by-row. */
+    bytesPerRow = (UWORD)(ts_w / 8);
+    planeSize = (ULONG)bytesPerRow * (ULONG)ts_h;
+    pTsBm = bitmapCreate((UWORD)ts_w, (UWORD)ts_h, (UBYTE)ts_bp, BMF_INTERLEAVED);
+    if (pTsBm) {
+        UWORD row;
+        for (row = 0; row < (UWORD)ts_h; row++) {
+            for (i = 0; i < (UBYTE)ts_bp; i++) {
+                const UBYTE *src = tileset_data + (ULONG)i * planeSize
+                                 + (ULONG)row * (ULONG)bytesPerRow;
+                UBYTE *dst = pTsBm->Planes[i]
+                           + (ULONG)row * (ULONG)pTsBm->BytesPerRow;
+                CopyMem((APTR)src, (APTR)dst, (ULONG)bytesPerRow);
+            }
+        }
+    }
+    tm->pTilesetBitmap = pTsBm;
+}
+
+void amipython_tilemap_show(AmipyTilemap *tm) {
+    s_pActiveTilemap = tm;
+
+    tm->pView = viewCreate(0,
+        TAG_VIEW_WINDOW_HEIGHT, (UWORD)tm->height,
+        TAG_DONE);
+    tm->pVPort = vPortCreate(0,
+        TAG_VPORT_VIEW, tm->pView,
+        TAG_VPORT_BPP, (UBYTE)tm->bitplanes,
+        TAG_VPORT_WIDTH, (UWORD)tm->width,
+        TAG_VPORT_HEIGHT, (UWORD)tm->height,
+        TAG_DONE);
+
+    /* Flush pending palette to vPort */
+    if (s_bHasPendingPalette && tm->pVPort) {
+        UWORD i;
+        for (i = 0; i < PALETTE_MAX; i++) {
+            if (s_bPaletteBuffered[i]) {
+                tm->pVPort->pPalette[i] = s_pPaletteBuffer[i];
+                s_bPaletteBuffered[i] = 0;
+            }
+        }
+        s_bHasPendingPalette = 0;
+    }
+
+    {
+        tTileBufferManager *pTileBfr = tileBufferCreate(0,
+            TAG_TILEBUFFER_VPORT, tm->pVPort,
+            TAG_TILEBUFFER_BITMAP_FLAGS, BMF_CLEAR | BMF_INTERLEAVED,
+            TAG_TILEBUFFER_BOUND_TILE_X, (UWORD)tm->mapW,
+            TAG_TILEBUFFER_BOUND_TILE_Y, (UWORD)tm->mapH,
+            TAG_TILEBUFFER_IS_DBLBUF, 0,
+            TAG_TILEBUFFER_TILE_SHIFT, (UWORD)tm->tileShift,
+            TAG_TILEBUFFER_REDRAW_QUEUE_LENGTH, 200,
+            TAG_TILEBUFFER_CALLBACK_TILE_DRAW, _onTileDraw,
+            TAG_TILEBUFFER_TILESET, tm->pTilesetBitmap,
+            TAG_DONE);
+        tm->pTileBfr = pTileBfr;
+        tm->pCamera = pTileBfr->pCamera;
+
+        /* Copy shadow tile data into tileBuffer's pTileData */
+        if (tm->pShadowTiles) {
+            UWORD tx, ty;
+            for (tx = 0; tx < tm->mapW; tx++) {
+                for (ty = 0; ty < tm->mapH; ty++) {
+                    pTileBfr->pTileData[tx][ty] =
+                        tm->pShadowTiles[(ULONG)tx * (ULONG)tm->mapH + (ULONG)ty];
+                }
+            }
+            memFree(tm->pShadowTiles, (ULONG)tm->mapW * (ULONG)tm->mapH);
+            tm->pShadowTiles = 0;
+        }
+
+        tileBufferRedrawAll(pTileBfr);
+    }
+
+    viewLoad(tm->pView);
+    systemUnuse();
+}
+
+void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y) {
+    if (tm->pCamera) {
+        cameraSetCoord((tCameraManager *)tm->pCamera, (UWORD)x, (UWORD)y);
+    }
+}
+
+void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy) {
+    if (tm->pCamera) {
+        cameraMoveBy((tCameraManager *)tm->pCamera, (WORD)dx, (WORD)dy);
+    }
+}
+
+void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
+    if (x < 0 || x >= tm->mapW || y < 0 || y >= tm->mapH) return;
+    if (tm->pTileBfr) {
+        tTileBufferManager *pTileBfr = (tTileBufferManager *)tm->pTileBfr;
+        pTileBfr->pTileData[x][y] = (UBYTE)tile;
+        tileBufferInvalidateTile(pTileBfr, (UWORD)x, (UWORD)y);
+    } else if (tm->pShadowTiles) {
+        /* Store in shadow buffer (column-major: x * mapH + y) */
+        tm->pShadowTiles[(ULONG)x * (ULONG)tm->mapH + (ULONG)y] = (UBYTE)tile;
+    }
+}
+
+void amipython_tilemap_process(AmipyTilemap *tm) {
+    if (tm && tm->pView && tm->pVPort) {
+        joyProcess();
+        viewProcessManagers(tm->pView);
+        copProcessBlocks();
+        vPortWaitForEnd(tm->pVPort);
+    }
+}
+
 #else
 /* ================================================================
  * dos.library trace stubs (vbcc / vamos)
@@ -1212,6 +1416,36 @@ void amipython_music_volume(LONG vol) {
     amipython_print_str("[music] volume ");
     amipython_print_long(vol);
     amipython_print_str("\n");
+}
+
+BOOL amipython_joy_left(void) { return TRUE; }
+BOOL amipython_joy_right(void) { return TRUE; }
+BOOL amipython_joy_up(void) { return TRUE; }
+BOOL amipython_joy_down(void) { return TRUE; }
+
+void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
+    LONG ts_w, LONG ts_h, LONG ts_bp,
+    LONG w, LONG h, LONG bp, LONG tile_size, LONG map_w, LONG map_h) {
+    tm->width = (UWORD)w; tm->height = (UWORD)h;
+    tm->bitplanes = (UBYTE)bp; tm->mapW = (UWORD)map_w; tm->mapH = (UWORD)map_h;
+    tm->tileShift = 4; tm->pShadowTiles = 0;
+    amipython_print_str("[tilemap] init\n");
+    (void)tileset_data; (void)ts_w; (void)ts_h; (void)ts_bp; (void)tile_size;
+}
+void amipython_tilemap_show(AmipyTilemap *tm) {
+    amipython_print_str("[tilemap] show\n"); (void)tm;
+}
+void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y) {
+    amipython_print_str("[tilemap] camera\n"); (void)tm; (void)x; (void)y;
+}
+void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy) {
+    amipython_print_str("[tilemap] scroll\n"); (void)tm; (void)dx; (void)dy;
+}
+void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
+    (void)tm; (void)x; (void)y; (void)tile;
+}
+void amipython_tilemap_process(AmipyTilemap *tm) {
+    amipython_print_str("[tilemap] process\n"); (void)tm;
 }
 
 #endif /* ACE_ENGINE */

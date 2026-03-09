@@ -80,6 +80,23 @@ typedef struct {
     UBYTE ubChannel;         /* last channel used */
     UBYTE bCollided;         /* set by collision_check() */
 } AmipySprite;
+
+/* Tilemap — tile buffer with hardware scrolling.
+ * pTileBfr and pCamera are void* here to avoid incomplete type issues;
+ * cast to tTileBufferManager and tCameraManager in the .c file. */
+typedef struct {
+    UWORD width, height;
+    UBYTE bitplanes;
+    UBYTE tileShift;
+    UWORD mapW, mapH;
+    struct tView *pView;
+    struct _tVPort *pVPort;
+    void *pTileBfr;
+    void *pCamera;
+    struct BitMap *pTilesetBitmap;
+    UBYTE *pShadowTiles;  /* flat mapW*mapH buffer for tiles set before show() */
+} AmipyTilemap;
+
 #else
 /* Host / vbcc stubs — simple data-only struct */
 typedef struct {
@@ -92,6 +109,14 @@ typedef struct {
     UBYTE *data;
     UBYTE bCollided;
 } AmipySprite;
+
+typedef struct {
+    UWORD width, height;
+    UBYTE bitplanes;
+    UBYTE tileShift;
+    UWORD mapW, mapH;
+    UBYTE *pShadowTiles;
+} AmipyTilemap;
 #endif
 
 void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp);
@@ -131,5 +156,17 @@ void amipython_music_load_embedded(const UBYTE *data, ULONG size);
 void amipython_music_play(void);
 void amipython_music_stop(void);
 void amipython_music_volume(LONG vol);
+BOOL amipython_joy_left(void);
+BOOL amipython_joy_right(void);
+BOOL amipython_joy_up(void);
+BOOL amipython_joy_down(void);
+void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
+    LONG ts_w, LONG ts_h, LONG ts_bp,
+    LONG w, LONG h, LONG bp, LONG tile_size, LONG map_w, LONG map_h);
+void amipython_tilemap_show(AmipyTilemap *tm);
+void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y);
+void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy);
+void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile);
+void amipython_tilemap_process(AmipyTilemap *tm);
 
 #endif /* AMIPYTHON_ENGINE_H */

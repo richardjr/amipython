@@ -275,6 +275,53 @@ music.volume(48)               # 0-64, default 64
 - In Python preview: uses pygame.mixer for MOD playback
 - No per-frame calls needed — music plays via interrupt
 
+### Tilemap (Hardware Scrolling)
+
+Tile-based scrolling maps using ACE's tileBufferManager for hardware-accelerated scrolling:
+
+```python
+from amiga import Tilemap, palette, joy, run
+
+tm = Tilemap("data/tiles.png", 320, 200, bitplanes=3,
+             tile_size=16, map_w=40, map_h=30)
+
+# Set tiles (column-major: x, y, tile_index)
+tm.set_tile(5, 3, 1)
+
+tm.show()              # create display and render initial tiles
+tm.scroll(2, 0)        # scroll by dx, dy pixels
+tm.camera(100, 50)     # set absolute camera position
+
+def update():
+    if joy.left():
+        tm.scroll(-2, 0)
+    if joy.right():
+        tm.scroll(2, 0)
+
+run(update, until=lambda: joy.button(0))
+```
+
+- Tileset PNG is a vertical strip — one tile per row, 16px wide
+- Tilemap creates its own display (replaces `Display`/`Bitmap`)
+- On Amiga: uses ACE tileBuffer with hardware fine scrolling (BPLCON1) and incremental edge redraws
+- In Python preview: pygame-based tile rendering with camera offset
+- `tile_size` must be a power of 2 (16 recommended for word-aligned blitter speed)
+- Map is column-major internally: `set_tile(x, y, tile_index)`
+
+### Joystick Directions
+
+```python
+from amiga import joy
+
+joy.left()      # True if joystick held left
+joy.right()     # True if joystick held right
+joy.up()        # True if joystick held up
+joy.down()      # True if joystick held down
+joy.button(0)   # True if fire button pressed
+```
+
+In Python preview, arrow keys substitute for joystick directions.
+
 ### Engine Builtins
 
 Top-level functions from the engine:

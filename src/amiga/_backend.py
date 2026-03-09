@@ -36,6 +36,7 @@ class Backend:
         self._clock = None
         self._surfaces: weakref.WeakSet = weakref.WeakSet()
         self._active_surface = None  # surface set by display.show()
+        self._active_tilemap = None  # set by tilemap.show()
 
     @classmethod
     def get(cls) -> Backend:

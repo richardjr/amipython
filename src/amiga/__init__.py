@@ -22,6 +22,7 @@ from amiga._joy import joy
 from amiga._mouse import mouse
 from amiga._collision import collision
 from amiga._music import music
+from amiga._tilemap import Tilemap
 from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "mouse",
     "collision",
     "music",
+    "Tilemap",
     "wait_mouse",
     "vwait",
     "rnd",

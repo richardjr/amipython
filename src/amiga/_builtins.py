@@ -63,6 +63,10 @@ def run(update_fn, *, until=None) -> None:
             mouse_sprite._x = mx // backend._scale
             mouse_sprite._y = my // backend._scale
         update_fn()
+        # Redraw tilemap after update if active
+        active_tm = getattr(backend, '_active_tilemap', None)
+        if active_tm is not None:
+            active_tm._redraw()
         if backend._active_surface is not None:
             # Render sprites as overlay before presenting
             sprites = getattr(backend, '_sprites', {})

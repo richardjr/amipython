@@ -143,6 +143,51 @@ class _Emitter:
         bp = info["depth"]
         return f'amipython_bitmap_load_embedded(&{var_name}, {data_name}, {w}, {h}, {bp});'
 
+    def _embed_tileset(self, path_literal: str) -> dict | None:
+        """Convert a tileset PNG at transpile time and return embedded data info.
+
+        Returns dict with data_name, width, height, depth for the C init call.
+        The planar data array is added to self._embedded_decls.
+        """
+        if not self.source_dir:
+            return None
+        rel_path = path_literal.strip('"')
+        import os
+        for ext in [None, ".png", ".iff"]:
+            if ext is None:
+                full = os.path.join(self.source_dir, rel_path)
+            else:
+                base = os.path.splitext(rel_path)[0]
+                full = os.path.join(self.source_dir, base + ext)
+            if os.path.exists(full):
+                break
+        else:
+            return None
+
+        from amipython.assets import convert_image_to_bytes
+        info = convert_image_to_bytes(full)
+        if info is None:
+            return None
+
+        data_name = f"s_assetData{self._embedded_counter}"
+        self._embedded_counter += 1
+
+        lines = [f"static const UBYTE {data_name}[] = {{"]
+        data = info["data"]
+        for i in range(0, len(data), 16):
+            chunk = data[i:i+16]
+            hex_vals = ", ".join(f"0x{b:02X}" for b in chunk)
+            lines.append(f"    {hex_vals},")
+        lines.append("};")
+        self._embedded_decls.append("\n".join(lines))
+
+        return {
+            "data_name": data_name,
+            "width": info["width"],
+            "height": info["height"],
+            "depth": info["depth"],
+        }
+
     def _embed_music(self, path_literal: str) -> str | None:
         """Embed a MOD file at transpile time and return the load call.
 
@@ -720,6 +765,17 @@ class _Emitter:
 
         # Build arg list: positional args + keyword args (fill defaults)
         args = [self._emit_expr(a) for a in call.args]
+        # Tilemap constructor: first arg is tileset path — embed tileset data
+        if type_name == "Tilemap" and args:
+            tileset_info = self._embed_tileset(args[0])
+            if tileset_info:
+                # Replace path arg with: data_ptr, ts_w, ts_h, ts_bp
+                args[0:1] = [tileset_info["data_name"],
+                             str(tileset_info["width"]),
+                             str(tileset_info["height"]),
+                             str(tileset_info["depth"])]
+            else:
+                args[0] = _rewrite_asset_path(args[0])
         kw_provided = {kw.arg: self._emit_expr(kw.value) for kw in call.keywords}
         for kw_name, (kw_type, kw_default) in ctor.keywords.items():
             if kw_name in kw_provided:
@@ -1269,7 +1325,8 @@ class _Emitter:
         return None
 
     def _is_engine_object_type(self, t: AmipyType) -> bool:
-        return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE, AmipyType.SPRITE)
+        return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE,
+                     AmipyType.SPRITE, AmipyType.TILEMAP)
 
     def _emit_run(self, call: ast.Call):
         """Emit run(update, until=lambda: expr) as a game loop."""
@@ -1279,9 +1336,20 @@ class _Emitter:
             if kw.arg == "until":
                 # Extract expression from lambda body
                 until_expr = self._emit_expr(kw.value.body)
+
+        # Detect tilemap mode — use tilemap_process instead of vwait
+        tilemap_var = None
+        for name, var in self.info.globals.items():
+            if var.type == AmipyType.TILEMAP:
+                tilemap_var = name
+                break
+
         self._line(f"while (!({until_expr})) {{")
         self.indent += 1
-        self._line("amipython_vwait(1);")
+        if tilemap_var:
+            self._line(f"amipython_tilemap_process(&{tilemap_var});")
+        else:
+            self._line("amipython_vwait(1);")
         self._line(f"{func_name}();")
         self.indent -= 1
         self._line("}")

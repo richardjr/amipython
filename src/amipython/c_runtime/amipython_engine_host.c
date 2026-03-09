@@ -216,3 +216,61 @@ void amipython_music_stop(void) {
 void amipython_music_volume(LONG vol) {
     printf("[music] volume %ld\n", vol);
 }
+
+BOOL amipython_joy_left(void) {
+    printf("[input] joy_left\n");
+    return FALSE;
+}
+
+BOOL amipython_joy_right(void) {
+    printf("[input] joy_right\n");
+    return FALSE;
+}
+
+BOOL amipython_joy_up(void) {
+    printf("[input] joy_up\n");
+    return FALSE;
+}
+
+BOOL amipython_joy_down(void) {
+    printf("[input] joy_down\n");
+    return FALSE;
+}
+
+void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
+    LONG ts_w, LONG ts_h, LONG ts_bp,
+    LONG w, LONG h, LONG bp, LONG tile_size, LONG map_w, LONG map_h) {
+    tm->width = (UWORD)w;
+    tm->height = (UWORD)h;
+    tm->bitplanes = (UBYTE)bp;
+    tm->mapW = (UWORD)map_w;
+    tm->mapH = (UWORD)map_h;
+    tm->tileShift = 4;
+    tm->pShadowTiles = 0;
+    printf("[tilemap] init %ldx%ld %ldbp tile=%ld map=%ldx%ld\n", w, h, bp, tile_size, map_w, map_h);
+    (void)tileset_data; (void)ts_w; (void)ts_h; (void)ts_bp;
+}
+
+void amipython_tilemap_show(AmipyTilemap *tm) {
+    printf("[tilemap] show\n");
+    (void)tm;
+}
+
+void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y) {
+    printf("[tilemap] camera %ld,%ld\n", x, y);
+    (void)tm;
+}
+
+void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy) {
+    printf("[tilemap] scroll %ld,%ld\n", dx, dy);
+    (void)tm;
+}
+
+void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
+    printf("[tilemap] set_tile %ld,%ld=%ld\n", x, y, tile);
+    (void)tm;
+}
+
+void amipython_tilemap_process(AmipyTilemap *tm) {
+    (void)tm;
+}

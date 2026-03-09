@@ -254,6 +254,60 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
             ),
         },
     ),
+    "Tilemap": EngineObjectType(
+        python_name="Tilemap",
+        c_type="AmipyTilemap",
+        c_init="amipython_tilemap_init",
+        constructor=EngineConstructor(
+            positional=[
+                EngineParam("tileset_path", AmipyType.STR),
+                EngineParam("width", AmipyType.INT),
+                EngineParam("height", AmipyType.INT),
+            ],
+            keywords={
+                "bitplanes": (AmipyType.INT, 3),
+                "tile_size": (AmipyType.INT, 16),
+                "map_w": (AmipyType.INT, 20),
+                "map_h": (AmipyType.INT, 20),
+            },
+        ),
+        methods={
+            "show": EngineMethod(
+                name="show",
+                c_name="amipython_tilemap_show",
+                params=[],
+                return_type=AmipyType.VOID,
+            ),
+            "camera": EngineMethod(
+                name="camera",
+                c_name="amipython_tilemap_camera",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "scroll": EngineMethod(
+                name="scroll",
+                c_name="amipython_tilemap_scroll",
+                params=[
+                    EngineParam("dx", AmipyType.INT),
+                    EngineParam("dy", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "set_tile": EngineMethod(
+                name="set_tile",
+                c_name="amipython_tilemap_set_tile",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("tile", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+        },
+    ),
 }
 
 MODULE_TYPES: dict[str, EngineModuleType] = {
@@ -314,6 +368,30 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
                 name="button",
                 c_name="amipython_joy_button",
                 params=[EngineParam("port", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
+            "left": EngineMethod(
+                name="left",
+                c_name="amipython_joy_left",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+            "right": EngineMethod(
+                name="right",
+                c_name="amipython_joy_right",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+            "up": EngineMethod(
+                name="up",
+                c_name="amipython_joy_up",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+            "down": EngineMethod(
+                name="down",
+                c_name="amipython_joy_down",
+                params=[],
                 return_type=AmipyType.BOOL,
             ),
         },
@@ -391,4 +469,5 @@ BUILTINS: dict[str, EngineBuiltin] = {
     ),
 }
 
-ALL_ENGINE_NAMES = set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS) | {"run", "sin_table", "cos_table"}
+ALL_ENGINE_NAMES = (set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS)
+                    | {"run", "sin_table", "cos_table"})
