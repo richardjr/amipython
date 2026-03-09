@@ -7,15 +7,15 @@
 
 from amiga import Tilemap, palette, joy, run
 
-# Set up sci-fi palette (OCS 12-bit: 0-15 per channel)
-palette.set(0, 0, 0, 0)        # black (void)
-palette.set(1, 2, 2, 3)        # dark blue-grey (floor)
-palette.set(2, 4, 4, 5)        # medium grey (wall)
-palette.set(3, 6, 6, 7)        # light grey (highlight)
-palette.set(4, 0, 10, 11)      # cyan (tech)
-palette.set(5, 1, 1, 2)        # very dark blue (shadow/void)
-palette.set(6, 0, 8, 4)        # green (status)
-palette.set(7, 11, 2, 2)       # red (warning)
+# Alien Breed-style palette (OCS 12-bit: 0-15 per channel)
+palette.set(0, 0, 0, 0)        # black (background)
+palette.set(1, 1, 1, 1)        # very dark grey-green (deep shadow)
+palette.set(2, 2, 2, 2)        # dark grey-green (floor base)
+palette.set(3, 4, 4, 3)        # medium grey-green (floor highlight)
+palette.set(4, 5, 5, 5)        # light grey (wall/metal)
+palette.set(5, 7, 7, 6)        # bright grey (highlights, rivets)
+palette.set(6, 0, 9, 6)        # tech green (screens, status)
+palette.set(7, 11, 3, 2)       # warning red (lights, hazard)
 
 # Create tilemap: 320x200 display, 3 bitplanes, 16px tiles, 40x30 map
 tm = Tilemap("data/scifi_tiles.png", 320, 200, bitplanes=3,
@@ -126,13 +126,16 @@ tm.show()
 scroll_speed = 2
 
 def update():
+    dx = 0
+    dy = 0
     if joy.left():
-        tm.scroll(-scroll_speed, 0)
+        dx = -scroll_speed
     if joy.right():
-        tm.scroll(scroll_speed, 0)
+        dx = scroll_speed
     if joy.up():
-        tm.scroll(0, -scroll_speed)
+        dy = -scroll_speed
     if joy.down():
-        tm.scroll(0, scroll_speed)
+        dy = scroll_speed
+    tm.scroll(dx, dy)
 
 run(update, until=lambda: joy.button(0))

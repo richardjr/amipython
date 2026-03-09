@@ -1104,10 +1104,10 @@ void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
 
 void amipython_tilemap_process(AmipyTilemap *tm) {
     if (tm && tm->pView && tm->pVPort) {
-        joyProcess();
         viewProcessManagers(tm->pView);
         copProcessBlocks();
         vPortWaitForEnd(tm->pVPort);
+        joyProcess();
     }
 }
 
