@@ -40,6 +40,11 @@ static UWORD s_pPaletteBuffer[PALETTE_MAX];
 static UBYTE s_bPaletteBuffered[PALETTE_MAX];
 static UBYTE s_bHasPendingPalette = 0;
 
+/* Target palette for fade — stores unscaled OCS 0xRGB values */
+static UWORD s_pTargetPalette[PALETTE_MAX];
+static UBYTE s_bTargetSet[PALETTE_MAX];
+static LONG s_bFadeLevel = 15;  /* 0=black, 15=full brightness */
+
 void amipython_engine_create(void) {
     systemCreate();
     logOpen(0);
@@ -317,6 +322,20 @@ void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     }
 }
 
+static void _palette_apply_fade(void) {
+    /* Write faded palette directly to hardware custom color registers.
+     * The copper rewrites palette from its instruction list each frame,
+     * so we also re-apply in vwait after the copper has run. */
+    if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
+        UBYTE colorCount = (UBYTE)(1 << s_pActiveDisplay->bitplanes);
+        volatile UWORD *hwColor = (volatile UWORD *)0xDFF180;
+        paletteDim(s_pTargetPalette, hwColor, colorCount, (UBYTE)s_bFadeLevel);
+        /* Also update ACE's RAM copy for consistency */
+        paletteDim(s_pTargetPalette, s_pActiveDisplay->pVPort->pPalette,
+                   colorCount, (UBYTE)s_bFadeLevel);
+    }
+}
+
 void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b) {
     /* ACE uses OCS 12-bit palette: 0xRGB, each 4 bits.
      * Our API takes 8-bit r/g/b — downscale to 4-bit. */
@@ -325,13 +344,14 @@ void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b) {
     color = (UWORD)(((r >> 4) & 0xF) << 8)
           | (UWORD)(((g >> 4) & 0xF) << 4)
           | (UWORD)((b >> 4) & 0xF);
+    s_pTargetPalette[reg] = color;
+    s_bTargetSet[reg] = 1;
     if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-        if (reg < (1L << s_pActiveDisplay->bitplanes)) {
-            s_pActiveDisplay->pVPort->pPalette[reg] = color;
-        }
+        /* Display active — apply with fade directly to hardware */
+        _palette_apply_fade();
     } else {
-        /* Buffer for later application when display.show() is called */
-        s_pPaletteBuffer[reg] = color;
+        /* Buffer for later — store the already-faded value */
+        s_pPaletteBuffer[reg] = paletteColorDim(color, (UBYTE)s_bFadeLevel);
         s_bPaletteBuffered[reg] = 1;
         s_bHasPendingPalette = 1;
     }
@@ -342,15 +362,22 @@ void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b) {
     UWORD color;
     if (reg < 0 || reg >= PALETTE_MAX) return;
     color = (UWORD)((r & 0xF) << 8) | (UWORD)((g & 0xF) << 4) | (UWORD)(b & 0xF);
+    s_pTargetPalette[reg] = color;
+    s_bTargetSet[reg] = 1;
     if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-        if (reg < (1L << s_pActiveDisplay->bitplanes)) {
-            s_pActiveDisplay->pVPort->pPalette[reg] = color;
-        }
+        _palette_apply_fade();
     } else {
-        s_pPaletteBuffer[reg] = color;
+        s_pPaletteBuffer[reg] = paletteColorDim(color, (UBYTE)s_bFadeLevel);
         s_bPaletteBuffered[reg] = 1;
         s_bHasPendingPalette = 1;
     }
+}
+
+void amipython_palette_fade(LONG level) {
+    if (level < 0) level = 0;
+    if (level > 15) level = 15;
+    s_bFadeLevel = level;
+    _palette_apply_fade();
 }
 
 void amipython_wait_mouse(void) {
@@ -370,6 +397,10 @@ void amipython_vwait(LONG n) {
             joyProcess();
             blitWait();
             vPortWaitForEnd(s_pActiveDisplay->pVPort);
+            /* Re-apply palette fade after copper has rewritten registers */
+            if (s_bFadeLevel < 15) {
+                _palette_apply_fade();
+            }
         }
     }
 }
@@ -1237,6 +1268,12 @@ void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b) {
     amipython_print_long(g);
     amipython_print_str(" b=");
     amipython_print_long(b);
+    amipython_print_str("\n");
+}
+
+void amipython_palette_fade(LONG level) {
+    amipython_print_str("[palette] fade ");
+    amipython_print_long(level);
     amipython_print_str("\n");
 }
 

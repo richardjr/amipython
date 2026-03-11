@@ -255,6 +255,7 @@ Singleton modules like `palette` and `music` are called directly:
 ```python
 palette.aga(0, 255, 0, 0)     # 8-bit RGB, downscaled to OCS 12-bit
 palette.set(0, 15, 0, 0)      # direct OCS 4-bit values
+palette.fade(7)                # fade all colours: 0=black, 15=full brightness
 ```
 
 ### Music (ProTracker MOD Playback)

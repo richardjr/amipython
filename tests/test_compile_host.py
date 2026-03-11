@@ -194,6 +194,17 @@ palette.aga(0, 255, 128, 64)
 ''')
         assert "[palette] aga 0 r=255 g=128 b=64" in output
 
+    def test_palette_fade(self):
+        output = _compile_and_run('''
+from amiga import palette
+palette.set(1, 15, 0, 0)
+palette.fade(7)
+palette.fade(0)
+''')
+        assert "[palette] set 1 r=15 g=0 b=0" in output
+        assert "[palette] fade 7" in output
+        assert "[palette] fade 0" in output
+
     def test_wait_mouse(self):
         output = _compile_and_run('''
 from amiga import wait_mouse

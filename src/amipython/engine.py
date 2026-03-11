@@ -336,6 +336,12 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "fade": EngineMethod(
+                name="fade",
+                c_name="amipython_palette_fade",
+                params=[EngineParam("level", AmipyType.INT)],
+                return_type=AmipyType.VOID,
+            ),
         },
     ),
     "mouse": EngineModuleType(

@@ -64,6 +64,10 @@ void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b) {
     printf("[palette] set %ld r=%ld g=%ld b=%ld\n", reg, r, g, b);
 }
 
+void amipython_palette_fade(LONG level) {
+    printf("[palette] fade %ld\n", level);
+}
+
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
     shape->width = (UWORD)w;
     shape->height = (UWORD)h;

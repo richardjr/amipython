@@ -12,8 +12,12 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 def reset_backend():
     """Reset the backend singleton between tests."""
     from amiga._backend import Backend
+    from amiga._palette import palette
     yield
     Backend.reset()
+    # Reset palette singleton state
+    palette._target_colors.clear()
+    palette._fade_level = 15
 
 
 def test_import_all():
@@ -69,6 +73,66 @@ def test_palette_out_of_range():
     palette.aga(256, 255, 0, 0)  # should not crash
     palette.set(-1, 15, 0, 0)
     palette.set(256, 15, 0, 0)
+
+
+def test_palette_fade_scales_colors():
+    """palette.fade() should scale all set colors by level/15."""
+    from amiga._backend import Backend
+    from amiga._palette import palette
+
+    palette.set(1, 15, 0, 0)   # full red → (255, 0, 0)
+    assert Backend.get()._palette[1] == (255, 0, 0)
+
+    palette.fade(0)
+    assert Backend.get()._palette[1] == (0, 0, 0)
+
+    palette.fade(15)
+    assert Backend.get()._palette[1] == (255, 0, 0)
+
+    # Half brightness: 255 * 7 // 15 = 119
+    palette.fade(7)
+    assert Backend.get()._palette[1] == (119, 0, 0)
+
+
+def test_palette_fade_multiple_registers():
+    """palette.fade() applies to all registers that have been set."""
+    from amiga._backend import Backend
+    from amiga._palette import palette
+
+    palette.set(0, 0, 0, 0)
+    palette.set(1, 15, 15, 15)  # white → (255, 255, 255)
+    palette.set(2, 8, 4, 0)
+
+    palette.fade(0)
+    assert Backend.get()._palette[0] == (0, 0, 0)
+    assert Backend.get()._palette[1] == (0, 0, 0)
+    assert Backend.get()._palette[2] == (0, 0, 0)
+
+
+def test_palette_fade_clamps():
+    """palette.fade() clamps level to 0-15."""
+    from amiga._backend import Backend
+    from amiga._palette import palette
+
+    palette.set(1, 15, 0, 0)
+    palette.fade(-5)
+    assert Backend.get()._palette[1] == (0, 0, 0)
+
+    palette.fade(99)
+    assert Backend.get()._palette[1] == (255, 0, 0)
+
+
+def test_palette_set_after_fade():
+    """palette.set() after fade should apply fade to new color."""
+    from amiga._backend import Backend
+    from amiga._palette import palette
+
+    palette.fade(0)
+    palette.set(1, 15, 15, 15)
+    assert Backend.get()._palette[1] == (0, 0, 0)
+
+    palette.fade(15)
+    assert Backend.get()._palette[1] == (255, 255, 255)
 
 
 def test_bitmap_creation():

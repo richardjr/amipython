@@ -134,6 +134,7 @@ void amipython_bitmap_load(AmipyBitmap *bm, const char *path);
 void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, LONG h, LONG bp);
 void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b);
 void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b);
+void amipython_palette_fade(LONG level);
 BOOL amipython_joy_button(LONG port);
 void amipython_wait_mouse(void);
 void amipython_vwait(LONG n);
