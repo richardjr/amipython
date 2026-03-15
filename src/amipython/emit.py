@@ -188,6 +188,105 @@ class _Emitter:
             "depth": info["depth"],
         }
 
+    def _emit_tilemap_load_tiled(self, var_name: str, call: ast.Call):
+        """Emit Tilemap.load_tiled() — parse Tiled JSON at transpile time.
+
+        Reads the JSON, embeds the tileset PNG, emits map data as set_tile
+        calls, and sets up blocking flags.
+        """
+        import json as json_mod
+        import os
+
+        json_path_str = self._emit_arg(call.args[0]).strip('"')
+        width_str = self._emit_arg(call.args[1])
+        height_str = self._emit_arg(call.args[2])
+
+        # Resolve keyword args
+        kw_provided = {kw.arg: self._emit_arg(kw.value) for kw in call.keywords}
+        bitplanes_str = kw_provided.get("bitplanes", "3")
+
+        # Read JSON file relative to source directory
+        if not self.source_dir:
+            raise EmitError("cannot resolve Tiled JSON path", lineno=call.lineno)
+        full_json = os.path.join(self.source_dir, json_path_str)
+        if not os.path.exists(full_json):
+            raise EmitError(
+                f"Tiled JSON not found: {full_json}", lineno=call.lineno)
+
+        with open(full_json) as f:
+            tiled = json_mod.load(f)
+
+        map_w = tiled["width"]
+        map_h = tiled["height"]
+        tile_size = tiled["tilewidth"]
+
+        # Find tileset and embed its image
+        ts_info = tiled["tilesets"][0]
+        firstgid = ts_info["firstgid"]
+        tileset_image = ts_info["image"]
+        json_dir = os.path.dirname(full_json)
+        tileset_full = os.path.join(json_dir, tileset_image)
+
+        tileset_info = self._embed_tileset(f'"{tileset_full}"')
+        if tileset_info is None:
+            raise EmitError(
+                f"cannot embed tileset: {tileset_full}", lineno=call.lineno)
+
+        # Extract blocking tile IDs
+        blocking_ids = set()
+        if "tiles" in ts_info:
+            for tile_info in ts_info["tiles"]:
+                tile_id = tile_info["id"]
+                for prop in tile_info.get("properties", []):
+                    if prop["name"] == "blocking" and prop.get("value", False):
+                        blocking_ids.add(tile_id)
+
+        # Emit blocking flags array as embedded data
+        tile_count = ts_info.get("tilecount", 0)
+        if tile_count > 0 and blocking_ids:
+            flags_name = f"s_blockingFlags{self._embedded_counter}"
+            self._embedded_counter += 1
+            flags = [1 if i in blocking_ids else 0 for i in range(tile_count)]
+            flags_hex = ", ".join(str(f) for f in flags)
+            self._embedded_decls.append(
+                f"static const UBYTE {flags_name}[] = {{ {flags_hex} }};")
+        else:
+            flags_name = "NULL"
+            tile_count = 0
+
+        # Emit tilemap init call with embedded tileset data
+        self._line(
+            f"amipython_tilemap_init(&{var_name}, "
+            f"{tileset_info['data_name']}, "
+            f"{tileset_info['width']}, {tileset_info['height']}, "
+            f"{tileset_info['depth']}, "
+            f"{width_str}, {height_str}, {bitplanes_str}, "
+            f"{tile_size}, {map_w}, {map_h});"
+        )
+
+        # Set blocking flags
+        if flags_name != "NULL":
+            self._line(
+                f"amipython_tilemap_set_blocking(&{var_name}, "
+                f"{flags_name}, {tile_count});"
+            )
+
+        # Emit tile data from the first tile layer
+        for layer in tiled["layers"]:
+            if layer["type"] == "tilelayer":
+                layer_data = layer["data"]
+                for i, gid in enumerate(layer_data):
+                    if gid > 0:
+                        tile_idx = gid - firstgid
+                        x = i % map_w
+                        y = i // map_w
+                        if tile_idx != 0:  # skip floor (tile 0) — it's the default
+                            self._line(
+                                f"amipython_tilemap_set_tile("
+                                f"&{var_name}, {x}, {y}, {tile_idx});"
+                            )
+                break
+
     def _embed_music(self, path_literal: str) -> str | None:
         """Embed a MOD file at transpile time and return the load call.
 
@@ -555,6 +654,11 @@ class _Emitter:
                 obj_type = OBJECT_TYPES[class_name]
                 if method_name in obj_type.static_methods:
                     static = obj_type.static_methods[method_name]
+                    # Tilemap.load_tiled — parse JSON at transpile time
+                    if method_name == "load_tiled" and class_name == "Tilemap":
+                        self._emit_tilemap_load_tiled(
+                            target.id, node.value)
+                        return
                     args_strs = [self._emit_arg(a) for a in node.value.args]
                     if method_name == "load" and class_name == "Shape" and args_strs:
                         # Try embedded approach (convert PNG at transpile time)
@@ -572,6 +676,15 @@ class _Emitter:
                         args_strs = [_rewrite_asset_path(s) for s in args_strs]
                     elif method_name == "load":
                         args_strs = [_rewrite_asset_path(s) for s in args_strs]
+                    # Resolve keyword args for static methods
+                    if hasattr(static, 'keywords') and static.keywords:
+                        kw_provided = {kw.arg: self._emit_arg(kw.value)
+                                       for kw in node.value.keywords}
+                        for kw_name, (kw_type, kw_default) in static.keywords.items():
+                            if kw_name in kw_provided:
+                                args_strs.append(kw_provided[kw_name])
+                            elif kw_default is not None:
+                                args_strs.append(str(kw_default))
                     args = ", ".join(args_strs)
                     if args:
                         self._line(f"{static.c_name}(&{target.id}, {args});")

@@ -251,6 +251,8 @@ void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
     tm->mapH = (UWORD)map_h;
     tm->tileShift = 4;
     tm->pShadowTiles = 0;
+    tm->pBlockingFlags = 0;
+    tm->blockingCount = 0;
     printf("[tilemap] init %ldx%ld %ldbp tile=%ld map=%ldx%ld\n", w, h, bp, tile_size, map_w, map_h);
     (void)tileset_data; (void)ts_w; (void)ts_h; (void)ts_bp;
 }
@@ -273,6 +275,39 @@ void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy) {
 void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
     printf("[tilemap] set_tile %ld,%ld=%ld\n", x, y, tile);
     (void)tm;
+}
+
+LONG amipython_tilemap_get_tile(AmipyTilemap *tm, LONG x, LONG y) {
+    printf("[tilemap] get_tile %ld,%ld\n", x, y);
+    (void)tm;
+    return 0;
+}
+
+BOOL amipython_tilemap_is_blocking(AmipyTilemap *tm, LONG pixel_x, LONG pixel_y) {
+    LONG tx, ty, tile;
+    if (!tm->pBlockingFlags || tm->blockingCount == 0) return FALSE;
+    tx = pixel_x >> tm->tileShift;
+    ty = pixel_y >> tm->tileShift;
+    if (tx < 0 || tx >= tm->mapW || ty < 0 || ty >= tm->mapH) return TRUE;
+    tile = 0; /* would read from shadow tiles if available */
+    if (tm->pShadowTiles) {
+        tile = tm->pShadowTiles[tx * tm->mapH + ty];
+    }
+    if (tile >= 0 && tile < tm->blockingCount) {
+        return tm->pBlockingFlags[tile] ? TRUE : FALSE;
+    }
+    return FALSE;
+}
+
+void amipython_tilemap_set_blocking(AmipyTilemap *tm, const UBYTE *flags, LONG count) {
+    tm->pBlockingFlags = flags;
+    tm->blockingCount = (UBYTE)count;
+    printf("[tilemap] set_blocking (%ld tile types)\n", count);
+}
+
+void amipython_tilemap_draw_shape(AmipyTilemap *tm, AmipyShape *shape, LONG world_x, LONG world_y) {
+    printf("[tilemap] draw_shape at %ld,%ld\n", world_x, world_y);
+    (void)tm; (void)shape;
 }
 
 void amipython_tilemap_process(AmipyTilemap *tm) {

@@ -70,6 +70,7 @@ typedef struct {
     UWORD width, height;
     UBYTE bitplanes;
     struct BitMap *pBitmap;  /* planar bitmap in chip RAM */
+    UWORD *pMask;            /* 1-plane cookie-cut mask (chip RAM) */
 } AmipyShape;
 
 /* Hardware sprite */
@@ -95,6 +96,8 @@ typedef struct {
     void *pCamera;
     struct BitMap *pTilesetBitmap;
     UBYTE *pShadowTiles;  /* flat mapW*mapH buffer for tiles set before show() */
+    const UBYTE *pBlockingFlags; /* per-tile-type blocking flags (tileCount entries) */
+    UBYTE blockingCount;         /* number of tile types with flag data */
 } AmipyTilemap;
 
 #else
@@ -116,6 +119,8 @@ typedef struct {
     UBYTE tileShift;
     UWORD mapW, mapH;
     UBYTE *pShadowTiles;
+    const UBYTE *pBlockingFlags;
+    UBYTE blockingCount;
 } AmipyTilemap;
 #endif
 
@@ -168,6 +173,10 @@ void amipython_tilemap_show(AmipyTilemap *tm);
 void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y);
 void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy);
 void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile);
+LONG amipython_tilemap_get_tile(AmipyTilemap *tm, LONG x, LONG y);
+BOOL amipython_tilemap_is_blocking(AmipyTilemap *tm, LONG pixel_x, LONG pixel_y);
+void amipython_tilemap_set_blocking(AmipyTilemap *tm, const UBYTE *flags, LONG count);
+void amipython_tilemap_draw_shape(AmipyTilemap *tm, AmipyShape *shape, LONG world_x, LONG world_y);
 void amipython_tilemap_process(AmipyTilemap *tm);
 
 #endif /* AMIPYTHON_ENGINE_H */

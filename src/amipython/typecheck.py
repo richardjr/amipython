@@ -848,6 +848,16 @@ class _TypeChecker(ast.NodeVisitor):
             )
         for arg in node.args:
             self._infer(arg)
+        # Validate keyword arguments if the static method supports them
+        if hasattr(static, 'keywords') and static.keywords:
+            for kw in node.keywords:
+                if kw.arg not in static.keywords:
+                    raise TypeCheckError(
+                        f"'{class_name}.{method_name}()' got unexpected keyword "
+                        f"argument '{kw.arg}'",
+                        lineno=node.lineno,
+                    )
+                self._infer(kw.value)
         return static.return_type
 
     def _infer_attribute(self, node: ast.Attribute) -> AmipyType:

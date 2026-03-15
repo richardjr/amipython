@@ -48,6 +48,7 @@ class EngineStaticMethod:
     c_name: str
     params: list[EngineParam]
     return_type: AmipyType
+    keywords: dict[str, tuple[AmipyType, object]] = field(default_factory=dict)
 
 
 @dataclass
@@ -305,6 +306,49 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                     EngineParam("tile", AmipyType.INT),
                 ],
                 return_type=AmipyType.VOID,
+            ),
+            "get_tile": EngineMethod(
+                name="get_tile",
+                c_name="amipython_tilemap_get_tile",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.INT,
+            ),
+            "is_blocking": EngineMethod(
+                name="is_blocking",
+                c_name="amipython_tilemap_is_blocking",
+                params=[
+                    EngineParam("pixel_x", AmipyType.INT),
+                    EngineParam("pixel_y", AmipyType.INT),
+                ],
+                return_type=AmipyType.BOOL,
+            ),
+            "draw_shape": EngineMethod(
+                name="draw_shape",
+                c_name="amipython_tilemap_draw_shape",
+                params=[
+                    EngineParam("shape", AmipyType.SHAPE),
+                    EngineParam("world_x", AmipyType.INT),
+                    EngineParam("world_y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+        },
+        static_methods={
+            "load_tiled": EngineStaticMethod(
+                name="load_tiled",
+                c_name="amipython_tilemap_init",
+                params=[
+                    EngineParam("json_path", AmipyType.STR),
+                    EngineParam("width", AmipyType.INT),
+                    EngineParam("height", AmipyType.INT),
+                ],
+                return_type=AmipyType.TILEMAP,
+                keywords={
+                    "bitplanes": (AmipyType.INT, 3),
+                },
             ),
         },
     ),

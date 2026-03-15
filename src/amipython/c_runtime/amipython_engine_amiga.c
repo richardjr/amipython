@@ -405,6 +405,39 @@ void amipython_vwait(LONG n) {
     }
 }
 
+/* Generate a 1-plane cookie-cut mask from a shape bitmap.
+ * Mask bit is 1 wherever ANY plane has a 1 (i.e., pixel is not color 0).
+ * Allocated in chip RAM for blitter use. */
+static UWORD *_generateShapeMask(tBitMap *pBm, UWORD w, UWORD h, UBYTE bp) {
+    UWORD wordsPerRow = w / 16;
+    ULONG maskWords = (ULONG)wordsPerRow * (ULONG)h;
+    ULONG maskBytes = maskWords * 2;
+    UWORD *pMask = (UWORD *)memAllocChip(maskBytes);
+    if (pMask) {
+        ULONG i;
+        for (i = 0; i < maskWords; i++) {
+            pMask[i] = 0;
+        }
+        {
+            UBYTE plane;
+            ULONG planeWords = (ULONG)(pBm->BytesPerRow / 2) * (ULONG)h;
+            for (plane = 0; plane < bp; plane++) {
+                UWORD *pPlane = (UWORD *)pBm->Planes[plane];
+                UWORD row, col;
+                for (row = 0; row < h; row++) {
+                    ULONG srcOff = (ULONG)row * (ULONG)(pBm->BytesPerRow / 2);
+                    ULONG dstOff = (ULONG)row * (ULONG)wordsPerRow;
+                    for (col = 0; col < wordsPerRow; col++) {
+                        pMask[dstOff + col] |= pPlane[srcOff + col];
+                    }
+                }
+                (void)planeWords;
+            }
+        }
+    }
+    return pMask;
+}
+
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
     /* Round width up to next multiple of 16 — blitter operates on words */
     UWORD uw = (UWORD)((w + 15) & ~15);
@@ -412,6 +445,7 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
     shape->width = uw;
     shape->height = uh;
     shape->bitplanes = bm->bitplanes;
+    shape->pMask = 0;
     shape->pBitmap = bitmapCreate(uw, uh, bm->bitplanes, BMF_CLEAR);
     if (shape->pBitmap && bm->pBitmap) {
         blitWait();
@@ -421,6 +455,7 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
             uw, uh,
             MINTERM_COOKIE
         );
+        shape->pMask = _generateShapeMask(shape->pBitmap, uw, uh, bm->bitplanes);
     }
 }
 
@@ -457,11 +492,13 @@ static tBitMap *_loadBitmapAsset(const char *path) {
 
 void amipython_shape_load(AmipyShape *shape, const char *path) {
     tBitMap *pBm = _loadBitmapAsset(path);
+    shape->pMask = 0;
     if (pBm) {
         shape->width = bitmapGetByteWidth(pBm) * 8;
         shape->height = pBm->Rows;
         shape->bitplanes = pBm->Depth;
         shape->pBitmap = pBm;
+        shape->pMask = _generateShapeMask(pBm, shape->width, shape->height, pBm->Depth);
     }
 }
 
@@ -470,6 +507,7 @@ void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w,
     UWORD bytesPerRow = (UWORD)(w / 8);
     ULONG planeSize = (ULONG)bytesPerRow * (ULONG)h;
     tBitMap *pBm = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, 0);
+    shape->pMask = 0;
     if (pBm) {
         for (i = 0; i < (UBYTE)bp; i++) {
             CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
@@ -478,6 +516,7 @@ void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w,
         shape->height = (UWORD)h;
         shape->bitplanes = (UBYTE)bp;
         shape->pBitmap = pBm;
+        shape->pMask = _generateShapeMask(pBm, (UWORD)w, (UWORD)h, (UBYTE)bp);
     }
 }
 
@@ -512,13 +551,17 @@ void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, 
 static UWORD s_uwJoyIgnoreCount = 10;  /* ignore first 10 frames (Amiberry LMB quirk) */
 
 BOOL amipython_joy_button(LONG port) {
-    mouseProcess();
-    if (s_uwJoyIgnoreCount > 0) {
-        s_uwJoyIgnoreCount--;
-        return FALSE;
+    if (port == 0) {
+        /* Port 0: mouse LMB (ACE MOUSE_PORT_1 = hardware port 1 = Amiberry port 0) */
+        mouseProcess();
+        if (s_uwJoyIgnoreCount > 0) {
+            s_uwJoyIgnoreCount--;
+            return FALSE;
+        }
+        return mouseUse(MOUSE_PORT_1, MOUSE_LMB) ? TRUE : FALSE;
     }
-    return mouseUse(MOUSE_PORT_1, MOUSE_LMB) ? TRUE : FALSE;
-    (void)port;
+    /* Port 1: joystick fire (ACE JOY1_FIRE = hardware port 2 = Amiberry port 1) */
+    return joyCheck(JOY1_FIRE) ? TRUE : FALSE;
 }
 
 LONG amipython_mouse_x(void) {
@@ -956,21 +999,22 @@ void amipython_music_volume(LONG vol) {
 }
 
 /* --- Joy directions (ACE joy manager) --- */
+/* ACE JOY1 = hardware PORT 2 (joystick port, Amiberry Port 1) */
 
 BOOL amipython_joy_left(void) {
-    return joyCheck(JOY2_LEFT) ? TRUE : FALSE;
+    return joyCheck(JOY1_LEFT) ? TRUE : FALSE;
 }
 
 BOOL amipython_joy_right(void) {
-    return joyCheck(JOY2_RIGHT) ? TRUE : FALSE;
+    return joyCheck(JOY1_RIGHT) ? TRUE : FALSE;
 }
 
 BOOL amipython_joy_up(void) {
-    return joyCheck(JOY2_UP) ? TRUE : FALSE;
+    return joyCheck(JOY1_UP) ? TRUE : FALSE;
 }
 
 BOOL amipython_joy_down(void) {
-    return joyCheck(JOY2_DOWN) ? TRUE : FALSE;
+    return joyCheck(JOY1_DOWN) ? TRUE : FALSE;
 }
 
 /* --- Tilemap (ACE tileBuffer) --- */
@@ -1016,6 +1060,8 @@ void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
     tm->pVPort = 0;
     tm->pTileBfr = 0;
     tm->pCamera = 0;
+    tm->pBlockingFlags = 0;
+    tm->blockingCount = 0;
 
     /* Allocate shadow tile buffer for set_tile calls before show() */
     {
@@ -1030,20 +1076,16 @@ void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
 
     /* Create tileset bitmap from embedded data.
      * Embedded data is non-interleaved (plane 0 complete, plane 1 complete, ...).
-     * Create as interleaved to match the scroll buffer — copy row-by-row. */
+     * Create as non-interleaved — ACE's tileBufferRedrawAll fast path has a
+     * modulo bug with interleaved 16px-wide (1-word) tilesets that only copies
+     * plane 0. Non-interleaved uses the plane-by-plane path which works. */
     bytesPerRow = (UWORD)(ts_w / 8);
     planeSize = (ULONG)bytesPerRow * (ULONG)ts_h;
-    pTsBm = bitmapCreate((UWORD)ts_w, (UWORD)ts_h, (UBYTE)ts_bp, BMF_INTERLEAVED);
+    pTsBm = bitmapCreate((UWORD)ts_w, (UWORD)ts_h, (UBYTE)ts_bp, 0);
     if (pTsBm) {
-        UWORD row;
-        for (row = 0; row < (UWORD)ts_h; row++) {
-            for (i = 0; i < (UBYTE)ts_bp; i++) {
-                const UBYTE *src = tileset_data + (ULONG)i * planeSize
-                                 + (ULONG)row * (ULONG)bytesPerRow;
-                UBYTE *dst = pTsBm->Planes[i]
-                           + (ULONG)row * (ULONG)pTsBm->BytesPerRow;
-                CopyMem((APTR)src, (APTR)dst, (ULONG)bytesPerRow);
-            }
+        for (i = 0; i < (UBYTE)ts_bp; i++) {
+            CopyMem((APTR)(tileset_data + (ULONG)i * planeSize),
+                    pTsBm->Planes[i], planeSize);
         }
     }
     tm->pTilesetBitmap = pTsBm;
@@ -1077,13 +1119,12 @@ void amipython_tilemap_show(AmipyTilemap *tm) {
     {
         tTileBufferManager *pTileBfr = tileBufferCreate(0,
             TAG_TILEBUFFER_VPORT, tm->pVPort,
-            TAG_TILEBUFFER_BITMAP_FLAGS, BMF_CLEAR | BMF_INTERLEAVED,
+            TAG_TILEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
             TAG_TILEBUFFER_BOUND_TILE_X, (UWORD)tm->mapW,
             TAG_TILEBUFFER_BOUND_TILE_Y, (UWORD)tm->mapH,
             TAG_TILEBUFFER_IS_DBLBUF, 0,
             TAG_TILEBUFFER_TILE_SHIFT, (UWORD)tm->tileShift,
             TAG_TILEBUFFER_REDRAW_QUEUE_LENGTH, 200,
-            TAG_TILEBUFFER_CALLBACK_TILE_DRAW, _onTileDraw,
             TAG_TILEBUFFER_TILESET, tm->pTilesetBitmap,
             TAG_DONE);
         tm->pTileBfr = pTileBfr;
@@ -1111,6 +1152,13 @@ void amipython_tilemap_show(AmipyTilemap *tm) {
 
 void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y) {
     if (tm->pCamera) {
+        LONG tileSize = (LONG)(1 << tm->tileShift);
+        LONG max_x = (LONG)tm->mapW * tileSize - (LONG)tm->width;
+        LONG max_y = (LONG)tm->mapH * tileSize - (LONG)tm->height;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > max_x) x = max_x;
+        if (y > max_y) y = max_y;
         cameraSetCoord((tCameraManager *)tm->pCamera, (UWORD)x, (UWORD)y);
     }
 }
@@ -1133,12 +1181,133 @@ void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
     }
 }
 
+LONG amipython_tilemap_get_tile(AmipyTilemap *tm, LONG x, LONG y) {
+    if (x < 0 || x >= tm->mapW || y < 0 || y >= tm->mapH) return -1;
+    if (tm->pTileBfr) {
+        tTileBufferManager *pTileBfr = (tTileBufferManager *)tm->pTileBfr;
+        return (LONG)pTileBfr->pTileData[x][y];
+    } else if (tm->pShadowTiles) {
+        return (LONG)tm->pShadowTiles[(ULONG)x * (ULONG)tm->mapH + (ULONG)y];
+    }
+    return 0;
+}
+
+BOOL amipython_tilemap_is_blocking(AmipyTilemap *tm, LONG pixel_x, LONG pixel_y) {
+    LONG tx, ty, tile;
+    if (!tm->pBlockingFlags || tm->blockingCount == 0) return FALSE;
+    tx = pixel_x >> tm->tileShift;
+    ty = pixel_y >> tm->tileShift;
+    if (tx < 0 || tx >= tm->mapW || ty < 0 || ty >= tm->mapH) return TRUE;
+    tile = amipython_tilemap_get_tile(tm, tx, ty);
+    if (tile >= 0 && tile < tm->blockingCount) {
+        return tm->pBlockingFlags[tile] ? TRUE : FALSE;
+    }
+    return FALSE;
+}
+
+void amipython_tilemap_set_blocking(AmipyTilemap *tm, const UBYTE *flags, LONG count) {
+    tm->pBlockingFlags = flags;
+    tm->blockingCount = (UBYTE)count;
+}
+
+/* Shape overlay queue for tilemap — drawn each frame on top of tiles */
+#define TILEMAP_MAX_SHAPES 16
+typedef struct {
+    AmipyShape *pShape;
+    WORD wWorldX, wWorldY;
+} _TilemapShapeEntry;
+
+static _TilemapShapeEntry s_tilemapShapes[TILEMAP_MAX_SHAPES];
+static UBYTE s_tilemapShapeCount = 0;
+
+/* Previous frame's shape rects for tile invalidation */
+static struct { UWORD x, y, w, h; } s_prevShapeRects[TILEMAP_MAX_SHAPES];
+static UBYTE s_prevShapeRectCount = 0;
+
+void amipython_tilemap_draw_shape(AmipyTilemap *tm, AmipyShape *shape, LONG world_x, LONG world_y) {
+    (void)tm;
+    if (s_tilemapShapeCount < TILEMAP_MAX_SHAPES && shape && shape->pBitmap && shape->pMask) {
+        s_tilemapShapes[s_tilemapShapeCount].pShape = shape;
+        s_tilemapShapes[s_tilemapShapeCount].wWorldX = (WORD)world_x;
+        s_tilemapShapes[s_tilemapShapeCount].wWorldY = (WORD)world_y;
+        s_tilemapShapeCount++;
+    }
+}
+
 void amipython_tilemap_process(AmipyTilemap *tm) {
-    if (tm && tm->pView && tm->pVPort) {
+    if (tm && tm->pView && tm->pVPort && tm->pTileBfr) {
+        tTileBufferManager *pTileBfr = (tTileBufferManager *)tm->pTileBfr;
+        UWORD camX = pTileBfr->pCamera->uPos.uwX;
+        UWORD camY = pTileBfr->pCamera->uPos.uwY;
+        UBYTE i;
+
+        /* Step 1: Directly redraw tiles under previous frame's shapes.
+         * Must use tileBufferDrawTile (immediate) not invalidateRect (queued),
+         * because the queue only processes one tile per frame. */
+        for (i = 0; i < s_prevShapeRectCount; i++) {
+            UWORD sx = s_prevShapeRects[i].x;
+            UWORD sy = s_prevShapeRects[i].y;
+            UWORD sw = s_prevShapeRects[i].w;
+            UWORD sh = s_prevShapeRects[i].h;
+            UWORD tx1 = sx >> pTileBfr->ubTileShift;
+            UWORD ty1 = sy >> pTileBfr->ubTileShift;
+            UWORD tx2 = (sx + sw - 1) >> pTileBfr->ubTileShift;
+            UWORD ty2 = (sy + sh - 1) >> pTileBfr->ubTileShift;
+            UWORD tx, ty;
+            for (ty = ty1; ty <= ty2 && ty < pTileBfr->uTileBounds.uwY; ty++) {
+                for (tx = tx1; tx <= tx2 && tx < pTileBfr->uTileBounds.uwX; tx++) {
+                    tileBufferDrawTile(pTileBfr, tx, ty);
+                }
+            }
+        }
+        s_prevShapeRectCount = 0;
+
+        /* Step 2: Process tile manager (handles margin scrolling) */
+        viewProcessManagers(tm->pView);
+        copProcessBlocks();
+
+        /* Step 3: Blit current frame's shapes using scrollBufferBlitMask.
+         * This handles buffer wrapping and uses the shape's cookie-cut mask
+         * for correct transparency over non-zero tile backgrounds. */
+        for (i = 0; i < s_tilemapShapeCount; i++) {
+            AmipyShape *shape = s_tilemapShapes[i].pShape;
+            WORD wx = s_tilemapShapes[i].wWorldX;
+            WORD wy = s_tilemapShapes[i].wWorldY;
+
+            /* Clip — skip if fully off-screen (world coords vs camera) */
+            if (wx + (WORD)shape->width <= (WORD)camX) continue;
+            if (wx >= (WORD)(camX + tm->width)) continue;
+            if (wy + (WORD)shape->height <= (WORD)camY) continue;
+            if (wy >= (WORD)(camY + tm->height)) continue;
+
+            blitWait();
+            scrollBufferBlitMask(
+                shape->pBitmap, 0, 0,
+                pTileBfr->pScroll,
+                wx, wy,
+                (WORD)shape->width, (WORD)shape->height,
+                shape->pMask
+            );
+
+            /* Save rect for invalidation next frame (world coords) */
+            if (s_prevShapeRectCount < TILEMAP_MAX_SHAPES) {
+                s_prevShapeRects[s_prevShapeRectCount].x = (UWORD)wx;
+                s_prevShapeRects[s_prevShapeRectCount].y = (UWORD)wy;
+                s_prevShapeRects[s_prevShapeRectCount].w = shape->width;
+                s_prevShapeRects[s_prevShapeRectCount].h = shape->height;
+                s_prevShapeRectCount++;
+            }
+        }
+        s_tilemapShapeCount = 0;
+
+        vPortWaitForEnd(tm->pVPort);
+        joyProcess();
+    } else if (tm && tm->pView && tm->pVPort) {
         viewProcessManagers(tm->pView);
         copProcessBlocks();
         vPortWaitForEnd(tm->pVPort);
         joyProcess();
+        s_tilemapShapeCount = 0;
     }
 }
 
@@ -1466,6 +1635,7 @@ void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
     tm->width = (UWORD)w; tm->height = (UWORD)h;
     tm->bitplanes = (UBYTE)bp; tm->mapW = (UWORD)map_w; tm->mapH = (UWORD)map_h;
     tm->tileShift = 4; tm->pShadowTiles = 0;
+    tm->pBlockingFlags = 0; tm->blockingCount = 0;
     amipython_print_str("[tilemap] init\n");
     (void)tileset_data; (void)ts_w; (void)ts_h; (void)ts_bp; (void)tile_size;
 }
@@ -1480,6 +1650,18 @@ void amipython_tilemap_scroll(AmipyTilemap *tm, LONG dx, LONG dy) {
 }
 void amipython_tilemap_set_tile(AmipyTilemap *tm, LONG x, LONG y, LONG tile) {
     (void)tm; (void)x; (void)y; (void)tile;
+}
+LONG amipython_tilemap_get_tile(AmipyTilemap *tm, LONG x, LONG y) {
+    (void)tm; (void)x; (void)y; return 0;
+}
+BOOL amipython_tilemap_is_blocking(AmipyTilemap *tm, LONG pixel_x, LONG pixel_y) {
+    (void)tm; (void)pixel_x; (void)pixel_y; return FALSE;
+}
+void amipython_tilemap_set_blocking(AmipyTilemap *tm, const UBYTE *flags, LONG count) {
+    tm->pBlockingFlags = flags; tm->blockingCount = (UBYTE)count;
+}
+void amipython_tilemap_draw_shape(AmipyTilemap *tm, AmipyShape *shape, LONG world_x, LONG world_y) {
+    (void)tm; (void)shape; (void)world_x; (void)world_y;
 }
 void amipython_tilemap_process(AmipyTilemap *tm) {
     amipython_print_str("[tilemap] process\n"); (void)tm;
