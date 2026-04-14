@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project notes
+
+Planning, open tasks, decisions, and meeting notes live in the Obsidian vault:
+`/home/richard/Work/Obsidian/projects/amipython/amipython.md`
+
+**Claude: read that file at the start of a session for current status and open tasks.** See `/home/richard/Work/Obsidian/CLAUDE.md` for vault conventions.
+
 ## Project
 
 **amipython** — A Python-to-Amiga game development toolchain. Transpiles a Python subset to C89, cross-compiles to native 68k Amiga executables. Scripts also run directly in Python via a pygame-based preview module. Inspired by the AMOS Basic / Blitz Basic model of "friendly language + purpose-built game runtime."
