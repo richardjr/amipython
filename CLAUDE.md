@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project notes
 
 Planning, open tasks, decisions, and meeting notes live in the Obsidian vault:
-`/home/richard/Work/Obsidian/projects/amipython/amipython.md`
+`/home/richard/Work/projects/projects/amipython/amipython.md`
 
-**Claude: read that file at the start of a session for current status and open tasks.** See `/home/richard/Work/Obsidian/CLAUDE.md` for vault conventions.
+**Claude: read that file at the start of a session for current status and open tasks.** See `/home/richard/Work/projects/CLAUDE.md` for vault conventions.
 
 ## Project
 
