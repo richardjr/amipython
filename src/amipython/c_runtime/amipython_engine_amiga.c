@@ -23,6 +23,7 @@
 #include <ace/managers/viewport/simplebuffer.h>
 #include <ace/managers/viewport/tilebuffer.h>
 #include <ace/managers/joy.h>
+#include <ace/managers/key.h>
 #include <ace/utils/extview.h>
 #include <ace/utils/bitmap.h>
 #include <ace/utils/chunky.h>
@@ -54,6 +55,7 @@ void amipython_engine_create(void) {
     copCreate();
     mouseCreate(MOUSE_PORT_1);
     joyOpen();
+    keyCreate();
     ptplayerCreate(1);  /* 1 = PAL */
 }
 
@@ -88,6 +90,7 @@ void amipython_engine_destroy(void) {
         s_pActiveDisplay->pVPort = 0;
         s_pActiveDisplay->pBfr = 0;
     }
+    keyDestroy();
     joyClose();
     mouseDestroy();
     copDestroy();
@@ -564,6 +567,16 @@ BOOL amipython_joy_button(LONG port) {
     return joyCheck(JOY1_FIRE) ? TRUE : FALSE;
 }
 
+/* Edge-triggered button: true only on frame that button transitions 0->1. */
+static BOOL s_prev_btn[2] = { FALSE, FALSE };
+BOOL amipython_joy_button_pressed(LONG port) {
+    BOOL curr = amipython_joy_button(port);
+    LONG idx = (port == 0) ? 0 : 1;
+    BOOL result = (curr && !s_prev_btn[idx]) ? TRUE : FALSE;
+    s_prev_btn[idx] = curr;
+    return result;
+}
+
 LONG amipython_mouse_x(void) {
     mouseProcess();
     return (LONG)mouseGetX(MOUSE_PORT_1);
@@ -841,6 +854,28 @@ void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
     (void)d; (void)from_channel;
 }
 
+#include <stdarg.h>
+void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    LONG cx = x;
+    LONG i;
+    va_start(ap, n);
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *);
+        LONG len = 0;
+        const char *p;
+        if (!s) s = "";
+        amipython_bitmap_print_at(bm, cx, y, s, color);
+        for (p = s; *p; p++) len++;
+        cx += (len * 8);
+        if (i + 1 < n) {
+            /* one blank glyph width as separator */
+            cx += 8;
+        }
+    }
+    va_end(ap);
+}
+
 LONG amipython_rnd(LONG n) {
     /* Simple LCG — adequate for games */
     static unsigned long s_seed = 12345;
@@ -1015,6 +1050,227 @@ BOOL amipython_joy_up(void) {
 
 BOOL amipython_joy_down(void) {
     return joyCheck(JOY1_DOWN) ? TRUE : FALSE;
+}
+
+/* Edge-triggered directions: true only on the frame of a 0->1 transition. */
+static BOOL s_prev_left = FALSE;
+static BOOL s_prev_right = FALSE;
+static BOOL s_prev_up = FALSE;
+static BOOL s_prev_down = FALSE;
+
+BOOL amipython_joy_left_pressed(void) {
+    BOOL curr = amipython_joy_left();
+    BOOL r = (curr && !s_prev_left) ? TRUE : FALSE;
+    s_prev_left = curr;
+    return r;
+}
+
+BOOL amipython_joy_right_pressed(void) {
+    BOOL curr = amipython_joy_right();
+    BOOL r = (curr && !s_prev_right) ? TRUE : FALSE;
+    s_prev_right = curr;
+    return r;
+}
+
+BOOL amipython_joy_up_pressed(void) {
+    BOOL curr = amipython_joy_up();
+    BOOL r = (curr && !s_prev_up) ? TRUE : FALSE;
+    s_prev_up = curr;
+    return r;
+}
+
+BOOL amipython_joy_down_pressed(void) {
+    BOOL curr = amipython_joy_down();
+    BOOL r = (curr && !s_prev_down) ? TRUE : FALSE;
+    s_prev_down = curr;
+    return r;
+}
+
+/* --- Keyboard (ACE key manager) --- */
+
+/* keyCheck/keyUse live in keyboardManager.pStates[]; keyCheck returns TRUE
+ * if the key is currently active (held, includes USED state). Previous-frame
+ * state for just_released is tracked in a local table. */
+static BOOL s_key_prev[256] = { FALSE };
+
+BOOL amipython_key_pressed(LONG code) {
+    if (code < 0 || code >= 256) return FALSE;
+    return keyCheck((UBYTE)code) ? TRUE : FALSE;
+}
+
+BOOL amipython_key_just_pressed(LONG code) {
+    if (code < 0 || code >= 256) return FALSE;
+    /* keyUse returns TRUE on first observation of an ACTIVE state, then marks
+     * it USED so subsequent calls return FALSE until next edge. */
+    return keyUse((UBYTE)code) ? TRUE : FALSE;
+}
+
+BOOL amipython_key_just_released(LONG code) {
+    if (code < 0 || code >= 256) return FALSE;
+    BOOL curr = keyCheck((UBYTE)code) ? TRUE : FALSE;
+    BOOL result = (!curr && s_key_prev[code]) ? TRUE : FALSE;
+    s_key_prev[code] = curr;
+    return result;
+}
+
+/* --- Sound effects --- */
+/* v1: samples are stored in memory per slot; actual ptplayer sfx integration
+ * is a TODO once we have real sample assets. Calls log through the ACE debug
+ * stream and are safe to invoke. */
+#define AMIPYTHON_SFX_SLOTS 8
+typedef struct { const UBYTE *data; ULONG size; UWORD rate; } _SfxSlot;
+static _SfxSlot s_sfx[AMIPYTHON_SFX_SLOTS];
+
+void amipython_sfx_load_embedded(LONG slot, const UBYTE *data, ULONG size, UWORD rate) {
+    if (slot < 0 || slot >= AMIPYTHON_SFX_SLOTS) return;
+    s_sfx[slot].data = data;
+    s_sfx[slot].size = size;
+    s_sfx[slot].rate = rate;
+}
+
+void amipython_sfx_load(LONG slot, const char *path) {
+    /* Non-embedded path not supported — assets are embedded at transpile time. */
+    (void)slot; (void)path;
+}
+
+void amipython_sfx_play(LONG slot, LONG channel, LONG volume) {
+    if (slot < 0 || slot >= AMIPYTHON_SFX_SLOTS) return;
+    if (!s_sfx[slot].data) return;
+    /* TODO: wire to ptplayerSfxPlay once sample struct construction is in. */
+    (void)channel; (void)volume;
+}
+
+void amipython_sfx_stop(LONG slot) {
+    (void)slot;
+    /* TODO: ptplayer channel stop */
+}
+
+/* --- Persistent storage (PROGDIR:<name>.dat via dos.library) --- */
+/* File layout:
+ *   bytes 0-3: magic "AMPY"
+ *   byte  4  : version (1)
+ *   byte  5  : type — 0=int_list, 1=str
+ *   For int_list: bytes 6-9 = count (BE32), followed by count * 4 BE32 values.
+ *   For str:      bytes 6-7 = length (BE16), followed by length bytes.
+ */
+#include <proto/dos.h>
+
+static void _store_path(const char *name, char *out, LONG out_len) {
+    const char *prefix = "PROGDIR:";
+    const char *suffix = ".dat";
+    LONG i = 0, j = 0;
+    while (prefix[j] && i < out_len - 1) out[i++] = prefix[j++];
+    j = 0;
+    while (name[j] && i < out_len - 1) out[i++] = name[j++];
+    j = 0;
+    while (suffix[j] && i < out_len - 1) out[i++] = suffix[j++];
+    out[i] = 0;
+}
+
+static void _be32(UBYTE *p, ULONG v) {
+    p[0] = (UBYTE)((v >> 24) & 0xFF); p[1] = (UBYTE)((v >> 16) & 0xFF);
+    p[2] = (UBYTE)((v >> 8) & 0xFF);  p[3] = (UBYTE)(v & 0xFF);
+}
+static ULONG _rd_be32(const UBYTE *p) {
+    return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16)
+         | ((ULONG)p[2] << 8) | (ULONG)p[3];
+}
+
+BOOL amipython_storage_exists(const char *name) {
+    char path[64];
+    BPTR f;
+    _store_path(name, path, sizeof(path));
+    f = Open(path, MODE_OLDFILE);
+    if (!f) return FALSE;
+    Close(f);
+    return TRUE;
+}
+
+void amipython_storage_save_int_list(const char *name, const LONG *items, LONG count) {
+    char path[64];
+    UBYTE header[10];
+    UBYTE buf[4];
+    BPTR f;
+    LONG i;
+    _store_path(name, path, sizeof(path));
+    f = Open(path, MODE_NEWFILE);
+    if (!f) return;
+    header[0]='A'; header[1]='M'; header[2]='P'; header[3]='Y';
+    header[4] = 1; header[5] = 0;
+    _be32(&header[6], (ULONG)count);
+    Write(f, (APTR)header, 10);
+    for (i = 0; i < count; i++) {
+        _be32(buf, (ULONG)items[i]);
+        Write(f, (APTR)buf, 4);
+    }
+    Close(f);
+}
+
+BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_out, LONG capacity) {
+    char path[64];
+    UBYTE header[10];
+    UBYTE buf[4];
+    BPTR f;
+    LONG i, count;
+    _store_path(name, path, sizeof(path));
+    f = Open(path, MODE_OLDFILE);
+    if (!f) return FALSE;
+    if (Read(f, header, 10) != 10 ||
+        header[0]!='A' || header[1]!='M' || header[2]!='P' || header[3]!='Y' ||
+        header[5] != 0) { Close(f); return FALSE; }
+    count = (LONG)_rd_be32(&header[6]);
+    if (count > capacity) count = capacity;
+    for (i = 0; i < count; i++) {
+        if (Read(f, buf, 4) != 4) break;
+        items[i] = (LONG)_rd_be32(buf);
+    }
+    *count_out = i;
+    Close(f);
+    return TRUE;
+}
+
+#define AMIPYTHON_STR_LOAD_MAX 32
+static char s_loaded_str[AMIPYTHON_STR_LOAD_MAX];
+
+void amipython_storage_save_str(const char *name, const char *value) {
+    char path[64];
+    UBYTE header[8];
+    LONG len = 0;
+    const char *p;
+    BPTR f;
+    _store_path(name, path, sizeof(path));
+    for (p = value; *p; p++) len++;
+    if (len > 0xFFFF) len = 0xFFFF;
+    f = Open(path, MODE_NEWFILE);
+    if (!f) return;
+    header[0]='A'; header[1]='M'; header[2]='P'; header[3]='Y';
+    header[4] = 1; header[5] = 1;
+    header[6] = (UBYTE)((len >> 8) & 0xFF);
+    header[7] = (UBYTE)(len & 0xFF);
+    Write(f, (APTR)header, 8);
+    if (len > 0) Write(f, (APTR)value, len);
+    Close(f);
+}
+
+const char *amipython_storage_load_str(const char *name) {
+    char path[64];
+    UBYTE header[8];
+    LONG len, rd;
+    BPTR f;
+    _store_path(name, path, sizeof(path));
+    s_loaded_str[0] = 0;
+    f = Open(path, MODE_OLDFILE);
+    if (!f) return s_loaded_str;
+    if (Read(f, header, 8) != 8 ||
+        header[0]!='A' || header[1]!='M' || header[2]!='P' || header[3]!='Y' ||
+        header[5] != 1) { Close(f); return s_loaded_str; }
+    len = ((LONG)header[6] << 8) | (LONG)header[7];
+    if (len >= AMIPYTHON_STR_LOAD_MAX) len = AMIPYTHON_STR_LOAD_MAX - 1;
+    rd = Read(f, s_loaded_str, len);
+    if (rd < 0) rd = 0;
+    s_loaded_str[rd] = 0;
+    Close(f);
+    return s_loaded_str;
 }
 
 /* --- Tilemap (ACE tileBuffer) --- */
@@ -1511,6 +1767,13 @@ BOOL amipython_joy_button(LONG port) {
     return TRUE;  /* Always TRUE so loops terminate in vamos */
 }
 
+BOOL amipython_joy_button_pressed(LONG port) {
+    amipython_print_str("[input] joy_button_pressed port=");
+    amipython_print_long(port);
+    amipython_print_str("\n");
+    return TRUE;
+}
+
 LONG amipython_mouse_x(void) {
     amipython_print_str("[input] mouse_x\n");
     return 160;
@@ -1580,6 +1843,23 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
     (void)bm; (void)x; (void)y; (void)color;
 }
 
+#include <stdarg.h>
+void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    LONG i;
+    va_start(ap, n);
+    amipython_print_str("[bitmap] print_at_multi ");
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *);
+        if (!s) s = "";
+        if (i > 0) amipython_print_str(" ");
+        amipython_print_str(s);
+    }
+    amipython_print_str("\n");
+    va_end(ap);
+    (void)bm; (void)x; (void)y; (void)color;
+}
+
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
     amipython_print_str("[display] sprites_behind\n");
     (void)d; (void)from_channel;
@@ -1628,6 +1908,95 @@ BOOL amipython_joy_left(void) { return TRUE; }
 BOOL amipython_joy_right(void) { return TRUE; }
 BOOL amipython_joy_up(void) { return TRUE; }
 BOOL amipython_joy_down(void) { return TRUE; }
+BOOL amipython_joy_left_pressed(void) { return TRUE; }
+BOOL amipython_joy_right_pressed(void) { return TRUE; }
+BOOL amipython_joy_up_pressed(void) { return TRUE; }
+BOOL amipython_joy_down_pressed(void) { return TRUE; }
+
+BOOL amipython_key_pressed(LONG code) {
+    amipython_print_str("[input] key_pressed 0x");
+    amipython_print_long(code);
+    amipython_print_str("\n");
+    return FALSE;
+}
+BOOL amipython_key_just_pressed(LONG code) {
+    amipython_print_str("[input] key_just_pressed 0x");
+    amipython_print_long(code);
+    amipython_print_str("\n");
+    return FALSE;
+}
+BOOL amipython_key_just_released(LONG code) {
+    amipython_print_str("[input] key_just_released 0x");
+    amipython_print_long(code);
+    amipython_print_str("\n");
+    return FALSE;
+}
+
+void amipython_sfx_load(LONG slot, const char *path) {
+    amipython_print_str("[sfx] load slot=");
+    amipython_print_long(slot);
+    amipython_print_str(" ");
+    amipython_print_str(path);
+    amipython_print_str("\n");
+}
+void amipython_sfx_load_embedded(LONG slot, const UBYTE *data, ULONG size, UWORD rate) {
+    amipython_print_str("[sfx] load_embedded slot=");
+    amipython_print_long(slot);
+    amipython_print_str(" size=");
+    amipython_print_long((LONG)size);
+    amipython_print_str("\n");
+    (void)data; (void)rate;
+}
+void amipython_sfx_play(LONG slot, LONG channel, LONG volume) {
+    amipython_print_str("[sfx] play slot=");
+    amipython_print_long(slot);
+    amipython_print_str(" channel=");
+    amipython_print_long(channel);
+    amipython_print_str(" volume=");
+    amipython_print_long(volume);
+    amipython_print_str("\n");
+}
+void amipython_sfx_stop(LONG slot) {
+    amipython_print_str("[sfx] stop slot=");
+    amipython_print_long(slot);
+    amipython_print_str("\n");
+}
+
+void amipython_storage_save_int_list(const char *name, const LONG *items, LONG count) {
+    amipython_print_str("[storage] save_int_list ");
+    amipython_print_str(name);
+    amipython_print_str(" count=");
+    amipython_print_long(count);
+    amipython_print_str("\n");
+    (void)items;
+}
+BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_out, LONG capacity) {
+    amipython_print_str("[storage] load_int_list ");
+    amipython_print_str(name);
+    amipython_print_str("\n");
+    *count_out = 0;
+    (void)items; (void)capacity;
+    return FALSE;
+}
+void amipython_storage_save_str(const char *name, const char *value) {
+    amipython_print_str("[storage] save_str ");
+    amipython_print_str(name);
+    amipython_print_str("=");
+    amipython_print_str(value);
+    amipython_print_str("\n");
+}
+const char *amipython_storage_load_str(const char *name) {
+    amipython_print_str("[storage] load_str ");
+    amipython_print_str(name);
+    amipython_print_str("\n");
+    return "";
+}
+BOOL amipython_storage_exists(const char *name) {
+    amipython_print_str("[storage] exists ");
+    amipython_print_str(name);
+    amipython_print_str("\n");
+    return FALSE;
+}
 
 void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
     LONG ts_w, LONG ts_h, LONG ts_bp,

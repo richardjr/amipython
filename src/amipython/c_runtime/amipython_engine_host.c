@@ -112,6 +112,16 @@ BOOL amipython_joy_button(LONG port) {
     return (s_joy_button_count > 3) ? TRUE : FALSE;
 }
 
+static BOOL s_host_prev_btn[2] = { FALSE, FALSE };
+BOOL amipython_joy_button_pressed(LONG port) {
+    BOOL curr = amipython_joy_button(port);
+    LONG idx = (port == 0) ? 0 : 1;
+    BOOL r = (curr && !s_host_prev_btn[idx]) ? TRUE : FALSE;
+    s_host_prev_btn[idx] = curr;
+    printf("[input] joy_button_pressed port=%ld -> %d\n", port, r);
+    return r;
+}
+
 void amipython_wait_mouse(void) {
     printf("[input] wait_mouse\n");
 }
@@ -179,6 +189,22 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
     (void)bm;
 }
 
+#include <stdarg.h>
+void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    LONG i;
+    va_start(ap, n);
+    printf("[bitmap] print_at_multi %ld,%ld color=%ld:", x, y, color);
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *);
+        if (!s) s = "";
+        printf(" \"%s\"", s);
+    }
+    printf("\n");
+    va_end(ap);
+    (void)bm;
+}
+
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
     printf("[display] sprites_behind from_channel=%ld\n", from_channel);
     (void)d;
@@ -239,6 +265,134 @@ BOOL amipython_joy_up(void) {
 BOOL amipython_joy_down(void) {
     printf("[input] joy_down\n");
     return FALSE;
+}
+
+BOOL amipython_joy_left_pressed(void) {
+    printf("[input] joy_left_pressed\n");
+    return FALSE;
+}
+BOOL amipython_joy_right_pressed(void) {
+    printf("[input] joy_right_pressed\n");
+    return FALSE;
+}
+BOOL amipython_joy_up_pressed(void) {
+    printf("[input] joy_up_pressed\n");
+    return FALSE;
+}
+BOOL amipython_joy_down_pressed(void) {
+    printf("[input] joy_down_pressed\n");
+    return FALSE;
+}
+
+BOOL amipython_key_pressed(LONG code) {
+    printf("[input] key_pressed 0x%02lx\n", code);
+    return FALSE;
+}
+BOOL amipython_key_just_pressed(LONG code) {
+    printf("[input] key_just_pressed 0x%02lx\n", code);
+    return FALSE;
+}
+BOOL amipython_key_just_released(LONG code) {
+    printf("[input] key_just_released 0x%02lx\n", code);
+    return FALSE;
+}
+
+/* --- Sound effects (host: trace only) --- */
+void amipython_sfx_load(LONG slot, const char *path) {
+    printf("[sfx] load slot=%ld \"%s\"\n", slot, path);
+}
+void amipython_sfx_load_embedded(LONG slot, const UBYTE *data, ULONG size, UWORD rate) {
+    printf("[sfx] load_embedded slot=%ld size=%lu rate=%u\n",
+           slot, (unsigned long)size, (unsigned)rate);
+    (void)data;
+}
+void amipython_sfx_play(LONG slot, LONG channel, LONG volume) {
+    printf("[sfx] play slot=%ld channel=%ld volume=%ld\n", slot, channel, volume);
+}
+void amipython_sfx_stop(LONG slot) {
+    printf("[sfx] stop slot=%ld\n", slot);
+}
+
+/* --- Storage (host: in-memory map so load round-trips save in tests) --- */
+#include <string.h>
+#include <stdlib.h>
+
+typedef struct { char name[32]; int kind; LONG *ints; LONG count; char *s; } _StorageEntry;
+static _StorageEntry s_storage[16];
+static LONG s_storage_count = 0;
+
+static _StorageEntry *_storage_find(const char *name) {
+    LONG i;
+    for (i = 0; i < s_storage_count; i++) {
+        if (strcmp(s_storage[i].name, name) == 0) return &s_storage[i];
+    }
+    return NULL;
+}
+
+static _StorageEntry *_storage_slot(const char *name) {
+    _StorageEntry *e = _storage_find(name);
+    if (e) {
+        if (e->ints) { free(e->ints); e->ints = NULL; }
+        if (e->s) { free(e->s); e->s = NULL; }
+        return e;
+    }
+    if (s_storage_count >= 16) return NULL;
+    e = &s_storage[s_storage_count++];
+    strncpy(e->name, name, 31);
+    e->name[31] = 0;
+    e->ints = NULL; e->count = 0; e->s = NULL; e->kind = 0;
+    return e;
+}
+
+void amipython_storage_save_int_list(const char *name, const LONG *items, LONG count) {
+    _StorageEntry *e = _storage_slot(name);
+    printf("[storage] save_int_list %s count=%ld\n", name, count);
+    if (!e) return;
+    e->kind = 0;
+    e->ints = (LONG *)malloc(sizeof(LONG) * (size_t)count);
+    if (e->ints) {
+        memcpy(e->ints, items, sizeof(LONG) * (size_t)count);
+        e->count = count;
+    }
+}
+
+BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_out, LONG capacity) {
+    _StorageEntry *e;
+    LONG n;
+    printf("[storage] load_int_list %s\n", name);
+    e = _storage_find(name);
+    if (!e || e->kind != 0 || !e->ints) { *count_out = 0; return FALSE; }
+    n = e->count < capacity ? e->count : capacity;
+    memcpy(items, e->ints, sizeof(LONG) * (size_t)n);
+    *count_out = n;
+    return TRUE;
+}
+
+void amipython_storage_save_str(const char *name, const char *value) {
+    _StorageEntry *e;
+    size_t len;
+    const char *src = value ? value : "";
+    printf("[storage] save_str %s=%s\n", name, src);
+    e = _storage_slot(name);
+    if (!e) return;
+    e->kind = 1;
+    len = strlen(src);
+    e->s = (char *)malloc(len + 1);
+    if (e->s) memcpy(e->s, src, len + 1);
+}
+
+const char *amipython_storage_load_str(const char *name) {
+    _StorageEntry *e = _storage_find(name);
+    printf("[storage] load_str %s\n", name);
+    if (!e || e->kind != 1 || !e->s) return "";
+    return e->s;
+}
+
+BOOL amipython_storage_exists(const char *name) {
+    BOOL r;
+    r = _storage_find(name) != NULL;
+    printf("[storage] exists %s -> %d\n", name, r);
+    return r;
 }
 
 void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,

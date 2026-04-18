@@ -239,3 +239,18 @@ class TestList:
         src = "x: int = 5\nfor i in x:\n    pass\n"
         with pytest.raises(TypeCheckError, match="non-list"):
             _typecheck(src)
+
+    def test_list_subscript_assign_ok(self):
+        _typecheck('nums: list[int] = []\nnums.append(1)\nnums[0] = 42\n')
+
+    def test_list_subscript_assign_wrong_type(self):
+        with pytest.raises(TypeCheckError):
+            _typecheck('nums: list[int] = []\nnums.append(1)\nnums[0] = 1.5\n')
+
+    def test_list_subscript_assign_non_list(self):
+        with pytest.raises(TypeCheckError):
+            _typecheck('x: int = 5\nx[0] = 1\n')
+
+    def test_list_subscript_assign_non_int_index(self):
+        with pytest.raises(TypeCheckError):
+            _typecheck('nums: list[int] = []\nnums.append(1)\nnums[1.5] = 42\n')

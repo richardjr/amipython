@@ -44,6 +44,17 @@ def rnd(n: int) -> int:
     return random.randint(0, n - 1)
 
 
+def int_to_str(n: int, width: int = 0) -> str:
+    """Return a zero-padded decimal string of `n`, at least `width` chars.
+
+    Matches the transpiled behaviour: negative numbers keep their sign in
+    the leftmost position; padding is applied to the digits only.
+    """
+    if n < 0:
+        return "-" + str(-n).rjust(max(0, width - 1), "0")
+    return str(n).rjust(max(0, width), "0")
+
+
 def run(update_fn, *, until=None) -> None:
     """Game loop — calls update_fn each frame until the until condition is True.
 

@@ -38,7 +38,7 @@ The Python preview and the Amiga binary produce visually identical output becaus
 
 ## What's Supported
 
-The preview module currently implements the Phase 2 API:
+The preview module currently implements the Phase 2–5B API:
 
 | Feature | Status |
 |---|---|
@@ -60,17 +60,23 @@ The preview module currently implements the Phase 2 API:
 | `Sprite.grab(bm, x, y, w, h)` | Supported |
 | `sprite.show(x, y, channel=)` | Supported |
 | `joy.button(port)` | Supported |
+| `joy.button_pressed(port)` / `joy.left_pressed()` etc. | Supported — edge-triggered |
+| `key.pressed(code)` / `key.just_pressed(code)` / `key.just_released(code)` | Supported — Amiga raw-key codes (K_A..K_Z, K_0..K_9, K_LEFT/RIGHT/UP/DOWN, K_SPACE, K_RETURN, K_ESC, K_P, ...) |
 | `mouse.x` / `mouse.y` | Supported |
 | `mouse.set_pointer(sprite)` | Supported |
 | `collision.register(color=, mask=)` | Supported |
 | `collision.check()` | Supported |
 | `bm.box_filled(...)` | Supported |
 | `bm.line(...)` | Supported |
-| `bm.print_at(x, y, text)` | Supported |
+| `bm.print_at(x, y, ...)` | Supported — variadic: accepts str/int/bool pieces, `color=` kwarg |
 | `sin_table(n)` / `cos_table(n)` | Supported |
+| `storage.save_int_list` / `load_int_list` / `save_str` / `load_str` / `exists` | Supported — persists to `~/.amipython/<script>/<name>.dat` |
+| `sfx.load(slot, path)` / `sfx.play(slot, channel=, volume=)` / `sfx.stop(slot)` | Supported — pygame.mixer.Sound per slot; embedded in binary on transpile |
 | `music.load(path)` | Supported — loads MOD via pygame.mixer |
 | `music.play()` / `music.stop()` | Supported |
 | `music.volume(vol)` | Supported — 0-64 |
+| `Tilemap(...)` + `set_tile`, `show`, `scroll`, `camera` | Supported — pygame tile rendering with camera offset |
+| `Bitmap.load(path)` | Supported — loads PNG, applies palette |
 
 Not yet implemented: copper effects, dual playfield, scrolling, keyboard input.
 
@@ -89,9 +95,8 @@ The internal surface runs at Amiga resolution (e.g. 320x256). The preview window
 ## Limitations
 
 - **No copper effects** — `copper.color_at()` per-scanline palette changes are not emulated
-- **No scrolling** — `display.scroll_to()` is not yet implemented
-- **No keyboard input** — `key` module is not yet implemented
-- **No dual playfield** — `DualPlayfield` is not yet implemented
+- **No raw `display.scroll_to()`** — use `Tilemap` for scrolling (supported)
+- **Partial dual playfield** — `dual_playfield_auto` works; full `DualPlayfield` API is not yet wired
 
 ## Architecture
 

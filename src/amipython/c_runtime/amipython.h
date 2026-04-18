@@ -126,6 +126,71 @@ AMIPYTHON_HELPER void amipython_print_space(void) {
 
 #endif
 
+/*
+ * String conversion helpers — str(int), str(bool), int_to_str(n, width).
+ *
+ * Use a ring of static buffers so that callers can nest several conversions
+ * in one expression (e.g. `print(str(a), str(b))`) without clobbering each
+ * other. Capacity is 4 buffers × 16 chars, enough for 32-bit signed decimals
+ * plus null plus zero-padding up to width 15.
+ */
+#define AMIPYTHON_STR_BUFS 4
+#define AMIPYTHON_STR_BUF_LEN 16
+
+AMIPYTHON_HELPER char *_amipython_str_buf(void) {
+    static char bufs[AMIPYTHON_STR_BUFS][AMIPYTHON_STR_BUF_LEN];
+    static int idx = 0;
+    char *p = bufs[idx];
+    idx = (idx + 1) & (AMIPYTHON_STR_BUFS - 1);
+    return p;
+}
+
+AMIPYTHON_HELPER const char *amipython_str_int(LONG val) {
+    char *buf = _amipython_str_buf();
+    char tmp[12];
+    char *t = tmp + sizeof(tmp) - 1;
+    unsigned long uval;
+    int neg = 0;
+    int i = 0;
+    *t = '\0';
+    if (val < 0) { neg = 1; uval = (unsigned long)(-(val + 1)) + 1; }
+    else { uval = (unsigned long)val; }
+    if (uval == 0) { *--t = '0'; }
+    else { while (uval > 0) { *--t = '0' + (char)(uval % 10); uval /= 10; } }
+    if (neg) *--t = '-';
+    while (*t && i < AMIPYTHON_STR_BUF_LEN - 1) { buf[i++] = *t++; }
+    buf[i] = '\0';
+    return buf;
+}
+
+AMIPYTHON_HELPER const char *amipython_str_bool(BOOL val) {
+    return val ? "True" : "False";
+}
+
+/* Zero-padded decimal. Width is clamped to the buffer capacity. */
+AMIPYTHON_HELPER const char *amipython_int_to_str(LONG val, LONG width) {
+    char *buf = _amipython_str_buf();
+    char tmp[12];
+    char *t = tmp + sizeof(tmp) - 1;
+    unsigned long uval;
+    int neg = 0;
+    int i = 0, digits, pad;
+    *t = '\0';
+    if (val < 0) { neg = 1; uval = (unsigned long)(-(val + 1)) + 1; }
+    else { uval = (unsigned long)val; }
+    if (uval == 0) { *--t = '0'; }
+    else { while (uval > 0) { *--t = '0' + (char)(uval % 10); uval /= 10; } }
+    digits = (int)((tmp + sizeof(tmp) - 1) - t);
+    if (width < 0) width = 0;
+    if (width > AMIPYTHON_STR_BUF_LEN - 1) width = AMIPYTHON_STR_BUF_LEN - 1;
+    pad = (int)width - digits - (neg ? 1 : 0);
+    if (neg) buf[i++] = '-';
+    while (pad-- > 0 && i < AMIPYTHON_STR_BUF_LEN - 1) buf[i++] = '0';
+    while (*t && i < AMIPYTHON_STR_BUF_LEN - 1) buf[i++] = *t++;
+    buf[i] = '\0';
+    return buf;
+}
+
 /* Floor division: Python rounds toward -infinity, C truncates toward zero */
 AMIPYTHON_HELPER LONG amipython_floordiv(LONG a, LONG b) {
     LONG q = a / b;

@@ -6,7 +6,7 @@ Pass 2: Walk function bodies and module-level code, inferring expression types.
 
 import ast
 
-from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES, EngineStaticMethod
+from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES, EngineStaticMethod
 from amipython.errors import TypeCheckError
 from amipython.types import (
     ANNOTATION_MAP,
@@ -109,6 +109,10 @@ def _collect_import(node: ast.ImportFrom, info: TypeInfo):
         if name in MODULE_TYPES:
             info.engine_modules.add(name)
             info.globals[name] = VariableInfo(name, AmipyType.MODULE)
+        elif name in KEY_CONSTANTS:
+            # Key-name constants are int literals at the Python level.
+            # Emitter will produce `#define K_NAME 0xHH` at the top of the C.
+            info.globals[name] = VariableInfo(name, AmipyType.INT)
 
 
 def _collect_function(node: ast.FunctionDef, info: TypeInfo):
@@ -289,7 +293,7 @@ class _TypeChecker(ast.NodeVisitor):
                         and isinstance(node.value.func, ast.Name)
                         and node.value.func.id in ("sin_table", "cos_table")
                         and val_type == AmipyType.LIST):
-                    capacity = 64
+                    capacity = 256
                     init_values = None
                     func_name = node.value.func.id
                     args = node.value.args
@@ -328,6 +332,34 @@ class _TypeChecker(ast.NodeVisitor):
                     self._set_var(target.id, val_type, lineno=node.lineno)
             elif isinstance(target, ast.Attribute):
                 self._check_field_assign(target, val_type, node.lineno)
+            elif isinstance(target, ast.Subscript):
+                self._check_subscript_assign(target, val_type, node.lineno)
+
+    def _check_subscript_assign(self, target: ast.Subscript, val_type: AmipyType, lineno: int):
+        if not isinstance(target.value, ast.Name):
+            raise TypeCheckError(
+                "subscript assignment target must be a list variable",
+                lineno=lineno,
+            )
+        var = self._get_var(target.value.id, lineno=lineno)
+        if var is None or var.type != AmipyType.LIST:
+            raise TypeCheckError(
+                f"'{target.value.id}' is not a list",
+                lineno=lineno,
+            )
+        idx_type = self._infer(target.slice)
+        if idx_type != AmipyType.INT:
+            raise TypeCheckError(
+                f"list index must be int, got {idx_type.name}",
+                lineno=lineno,
+            )
+        elem_type = var.list_element_type
+        if elem_type is not None and elem_type != val_type \
+                and not _can_promote(val_type, elem_type):
+            raise TypeCheckError(
+                f"cannot assign {val_type.name} to list[{elem_type.name}]",
+                lineno=lineno,
+            )
 
     def visit_AugAssign(self, node: ast.AugAssign):
         if isinstance(node.target, ast.Attribute):
@@ -512,6 +544,18 @@ class _TypeChecker(ast.NodeVisitor):
                 for arg in node.args:
                     self._infer(arg)
                 return AmipyType.FLOAT
+            if name == "str":
+                if len(node.args) != 1:
+                    raise TypeCheckError(
+                        "str() takes exactly 1 argument", lineno=node.lineno,
+                    )
+                arg_t = self._infer(node.args[0])
+                if arg_t not in (AmipyType.INT, AmipyType.BOOL):
+                    raise TypeCheckError(
+                        "str() supports int or bool arguments only",
+                        lineno=node.lineno,
+                    )
+                return AmipyType.STR
             if name == "abs":
                 if len(node.args) == 1:
                     return self._infer(node.args[0])
@@ -767,14 +811,38 @@ class _TypeChecker(ast.NodeVisitor):
     def _check_method_args(self, node: ast.Call, method, label: str):
         """Validate positional + keyword args for an EngineMethod."""
         n_positional = len(method.params)
-        if len(node.args) != n_positional:
-            raise TypeCheckError(
-                f"'{label}()' expects {n_positional} positional "
-                f"arguments, got {len(node.args)}",
-                lineno=node.lineno,
-            )
-        for arg in node.args:
-            self._infer(arg)
+        # print_at is variadic in the text args — accepts 3+ positional args,
+        # where args[2:] are the text pieces to render space-separated.
+        if method.name == "print_at":
+            if len(node.args) < n_positional:
+                raise TypeCheckError(
+                    f"'{label}()' expects at least {n_positional} positional "
+                    f"arguments, got {len(node.args)}",
+                    lineno=node.lineno,
+                )
+            # Type-check each arg (x/y int, text args any of int/float/bool/str).
+            for i, arg in enumerate(node.args):
+                t = self._infer(arg)
+                if i < 2 and t != AmipyType.INT:
+                    raise TypeCheckError(
+                        f"'{label}()' argument {i + 1} (x/y) must be int, got {t.name}",
+                        lineno=node.lineno,
+                    )
+                if i >= 2 and t not in (AmipyType.INT, AmipyType.FLOAT,
+                                        AmipyType.BOOL, AmipyType.STR):
+                    raise TypeCheckError(
+                        f"'{label}()' text args must be int, float, bool or str",
+                        lineno=node.lineno,
+                    )
+        else:
+            if len(node.args) != n_positional:
+                raise TypeCheckError(
+                    f"'{label}()' expects {n_positional} positional "
+                    f"arguments, got {len(node.args)}",
+                    lineno=node.lineno,
+                )
+            for arg in node.args:
+                self._infer(arg)
         if method.keywords:
             for kw in node.keywords:
                 if kw.arg not in method.keywords:

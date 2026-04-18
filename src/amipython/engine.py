@@ -420,9 +420,21 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
                 params=[EngineParam("port", AmipyType.INT)],
                 return_type=AmipyType.BOOL,
             ),
+            "button_pressed": EngineMethod(
+                name="button_pressed",
+                c_name="amipython_joy_button_pressed",
+                params=[EngineParam("port", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
             "left": EngineMethod(
                 name="left",
                 c_name="amipython_joy_left",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+            "left_pressed": EngineMethod(
+                name="left_pressed",
+                c_name="amipython_joy_left_pressed",
                 params=[],
                 return_type=AmipyType.BOOL,
             ),
@@ -432,15 +444,33 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
                 params=[],
                 return_type=AmipyType.BOOL,
             ),
+            "right_pressed": EngineMethod(
+                name="right_pressed",
+                c_name="amipython_joy_right_pressed",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
             "up": EngineMethod(
                 name="up",
                 c_name="amipython_joy_up",
                 params=[],
                 return_type=AmipyType.BOOL,
             ),
+            "up_pressed": EngineMethod(
+                name="up_pressed",
+                c_name="amipython_joy_up_pressed",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
             "down": EngineMethod(
                 name="down",
                 c_name="amipython_joy_down",
+                params=[],
+                return_type=AmipyType.BOOL,
+            ),
+            "down_pressed": EngineMethod(
+                name="down_pressed",
+                c_name="amipython_joy_down_pressed",
                 params=[],
                 return_type=AmipyType.BOOL,
             ),
@@ -475,6 +505,103 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
             ),
         },
     ),
+    "key": EngineModuleType(
+        python_name="key",
+        functions={
+            "pressed": EngineMethod(
+                name="pressed",
+                c_name="amipython_key_pressed",
+                params=[EngineParam("code", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
+            "just_pressed": EngineMethod(
+                name="just_pressed",
+                c_name="amipython_key_just_pressed",
+                params=[EngineParam("code", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
+            "just_released": EngineMethod(
+                name="just_released",
+                c_name="amipython_key_just_released",
+                params=[EngineParam("code", AmipyType.INT)],
+                return_type=AmipyType.BOOL,
+            ),
+        },
+    ),
+    "sfx": EngineModuleType(
+        python_name="sfx",
+        functions={
+            "load": EngineMethod(
+                name="load",
+                c_name="amipython_sfx_load",
+                params=[
+                    EngineParam("slot", AmipyType.INT),
+                    EngineParam("path", AmipyType.STR),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "play": EngineMethod(
+                name="play",
+                c_name="amipython_sfx_play",
+                params=[EngineParam("slot", AmipyType.INT)],
+                return_type=AmipyType.VOID,
+                keywords={
+                    "channel": (AmipyType.INT, 2),
+                    "volume": (AmipyType.INT, 64),
+                },
+            ),
+            "stop": EngineMethod(
+                name="stop",
+                c_name="amipython_sfx_stop",
+                params=[EngineParam("slot", AmipyType.INT)],
+                return_type=AmipyType.VOID,
+            ),
+        },
+    ),
+    "storage": EngineModuleType(
+        python_name="storage",
+        functions={
+            "save_int_list": EngineMethod(
+                name="save_int_list",
+                c_name="amipython_storage_save_int_list",
+                params=[
+                    EngineParam("name", AmipyType.STR),
+                    EngineParam("items", AmipyType.LIST),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "load_int_list": EngineMethod(
+                name="load_int_list",
+                c_name="amipython_storage_load_int_list",
+                params=[
+                    EngineParam("name", AmipyType.STR),
+                    EngineParam("items", AmipyType.LIST),
+                ],
+                return_type=AmipyType.BOOL,
+            ),
+            "save_str": EngineMethod(
+                name="save_str",
+                c_name="amipython_storage_save_str",
+                params=[
+                    EngineParam("name", AmipyType.STR),
+                    EngineParam("value", AmipyType.STR),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "load_str": EngineMethod(
+                name="load_str",
+                c_name="amipython_storage_load_str",
+                params=[EngineParam("name", AmipyType.STR)],
+                return_type=AmipyType.STR,
+            ),
+            "exists": EngineMethod(
+                name="exists",
+                c_name="amipython_storage_exists",
+                params=[EngineParam("name", AmipyType.STR)],
+                return_type=AmipyType.BOOL,
+            ),
+        },
+    ),
     "collision": EngineModuleType(
         python_name="collision",
         functions={
@@ -498,6 +625,25 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
     ),
 }
 
+# Keyboard key-name constants — Amiga raw-key codes. Names that user code
+# imports from `amiga`, like `K_LEFT`, `K_SPACE`. Values are ACE KEY_* codes.
+KEY_CONSTANTS: dict[str, int] = {
+    # Letters
+    "K_A": 0x20, "K_B": 0x35, "K_C": 0x33, "K_D": 0x22, "K_E": 0x12,
+    "K_F": 0x23, "K_G": 0x24, "K_H": 0x25, "K_I": 0x17, "K_J": 0x26,
+    "K_K": 0x27, "K_L": 0x28, "K_M": 0x37, "K_N": 0x36, "K_O": 0x18,
+    "K_P": 0x19, "K_Q": 0x10, "K_R": 0x13, "K_S": 0x21, "K_T": 0x14,
+    "K_U": 0x16, "K_V": 0x34, "K_W": 0x11, "K_X": 0x32, "K_Y": 0x15,
+    "K_Z": 0x31,
+    # Digits (row 1..9,0)
+    "K_1": 0x01, "K_2": 0x02, "K_3": 0x03, "K_4": 0x04, "K_5": 0x05,
+    "K_6": 0x06, "K_7": 0x07, "K_8": 0x08, "K_9": 0x09, "K_0": 0x0A,
+    # Navigation / special
+    "K_LEFT": 0x4F, "K_RIGHT": 0x4E, "K_UP": 0x4C, "K_DOWN": 0x4D,
+    "K_SPACE": 0x40, "K_RETURN": 0x44, "K_ESC": 0x45,
+}
+
+
 BUILTINS: dict[str, EngineBuiltin] = {
     "wait_mouse": EngineBuiltin(
         python_name="wait_mouse",
@@ -517,7 +663,17 @@ BUILTINS: dict[str, EngineBuiltin] = {
         params=[EngineParam("n", AmipyType.INT)],
         return_type=AmipyType.INT,
     ),
+    "int_to_str": EngineBuiltin(
+        python_name="int_to_str",
+        c_name="amipython_int_to_str",
+        params=[
+            EngineParam("n", AmipyType.INT),
+            EngineParam("width", AmipyType.INT),
+        ],
+        return_type=AmipyType.STR,
+    ),
 }
 
 ALL_ENGINE_NAMES = (set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS)
+                    | set(KEY_CONSTANTS)
                     | {"run", "sin_table", "cos_table"})

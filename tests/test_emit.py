@@ -213,13 +213,13 @@ class TestList:
     def test_list_decl(self):
         src = STRUCT_PREAMBLE + "@dataclass\nclass Ball:\n    x: float\nballs: list[Ball] = []\n"
         c = _emit(src)
-        assert "Ball balls_items[64];" in c
+        assert "Ball balls_items[256];" in c
         assert "LONG balls_count = 0;" in c
 
     def test_list_int_decl(self):
         src = "nums: list[int] = []\n"
         c = _emit(src)
-        assert "LONG nums_items[64];" in c
+        assert "LONG nums_items[256];" in c
         assert "LONG nums_count = 0;" in c
 
     def test_list_append_struct(self):
@@ -245,3 +245,18 @@ class TestList:
         assert "for (b_idx = 0; b_idx < balls_count; b_idx++)" in c
         assert "b = &balls_items[b_idx];" in c
         assert "b->x += 1.0f;" in c
+
+    def test_list_subscript_assign_int(self):
+        src = "nums: list[int] = []\nnums.append(0)\nnums[0] = 42\n"
+        c = _emit(src)
+        assert "nums_items[0] = 42;" in c
+
+    def test_list_subscript_assign_expr_index(self):
+        src = (
+            "board: list[int] = []\n"
+            "for i in range(10):\n    board.append(0)\n"
+            "x: int = 3\ny: int = 2\n"
+            "board[y * 10 + x] = 1\n"
+        )
+        c = _emit(src)
+        assert "board_items[((y * 10) + x)] = 1;" in c

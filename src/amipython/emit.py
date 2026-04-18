@@ -4,7 +4,7 @@ import ast
 import math
 import re
 
-from amipython.engine import BUILTINS, MODULE_TYPES, OBJECT_TYPES
+from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import EmitError
 from amipython.types import (
     C_TYPE_MAP,
@@ -287,6 +287,74 @@ class _Emitter:
                             )
                 break
 
+    def _embed_sfx(self, slot_expr: str, path_literal: str) -> str | None:
+        """Embed a WAV file at transpile time and return the load call.
+
+        Converts the WAV to 8-bit signed mono, emits it as a static UBYTE
+        array, and returns a C statement calling amipython_sfx_load_embedded.
+        """
+        if not self.source_dir:
+            return None
+        import os
+        import wave
+        rel_path = path_literal.strip('"')
+        full = os.path.join(self.source_dir, rel_path)
+        if not os.path.exists(full):
+            return None
+
+        try:
+            with wave.open(full, "rb") as w:
+                channels = w.getnchannels()
+                sampwidth = w.getsampwidth()  # bytes per sample
+                rate = w.getframerate()
+                nframes = w.getnframes()
+                raw = w.readframes(nframes)
+        except (wave.Error, OSError):
+            return None
+
+        # Convert to 8-bit signed mono.
+        samples = bytearray()
+        if sampwidth == 1:
+            # 8-bit WAV is unsigned; shift to signed.
+            if channels == 1:
+                samples.extend(((b - 128) & 0xFF) for b in raw)
+            else:
+                for i in range(0, len(raw), channels):
+                    avg = sum(raw[i:i + channels]) // channels
+                    samples.append((avg - 128) & 0xFF)
+        elif sampwidth == 2:
+            # 16-bit signed little-endian; scale down by 8 bits.
+            import struct as _struct
+            count = len(raw) // 2
+            vals = _struct.unpack(f"<{count}h", raw)
+            if channels == 1:
+                samples.extend(((v >> 8) & 0xFF) for v in vals)
+            else:
+                for i in range(0, count, channels):
+                    avg = sum(vals[i:i + channels]) // channels
+                    samples.append(((avg >> 8) & 0xFF))
+        else:
+            return None  # unsupported bit depth
+
+        data = bytes(samples)
+        data_name = f"s_sfxData{self._embedded_counter}"
+        size_name = f"s_sfxSize{self._embedded_counter}"
+        self._embedded_counter += 1
+
+        lines = [f"static const UBYTE {data_name}[] = {{"]
+        for i in range(0, len(data), 16):
+            chunk = data[i:i + 16]
+            hex_vals = ", ".join(f"0x{b:02X}" for b in chunk)
+            lines.append(f"    {hex_vals},")
+        lines.append("};")
+        lines.append(f"static const ULONG {size_name} = {len(data)}UL;")
+        self._embedded_decls.append("\n".join(lines))
+
+        return (
+            f"amipython_sfx_load_embedded({slot_expr}, {data_name}, "
+            f"{size_name}, {rate});"
+        )
+
     def _embed_music(self, path_literal: str) -> str | None:
         """Embed a MOD file at transpile time and return the load call.
 
@@ -384,6 +452,16 @@ class _Emitter:
             self._line('#include "amipython_engine.h"')
         self._line()
 
+        # Key-name constants imported from `amiga` become #define lines so
+        # user code can reference them by name (e.g. key.pressed(K_LEFT)).
+        imported_keys = sorted(
+            name for name in self.info.engine_imports if name in KEY_CONSTANTS
+        )
+        if imported_keys:
+            for name in imported_keys:
+                self._line(f"#define {name} 0x{KEY_CONSTANTS[name]:02X}")
+            self._line()
+
         # Emit struct typedefs
         if self.info.structs:
             for struct in self.info.structs.values():
@@ -450,6 +528,8 @@ class _Emitter:
         for name, var in self.info.globals.items():
             if var.type == AmipyType.MODULE:
                 continue  # modules aren't C variables
+            if name in KEY_CONSTANTS and name in self.info.engine_imports:
+                continue  # key-name constants are emitted as #defines above
             if var.type == AmipyType.STRUCT and var.struct_name:
                 if var.is_ref:
                     self._line(f"{var.struct_name} *{name};")
@@ -721,6 +801,11 @@ class _Emitter:
             val = self._emit_expr(node.value)
             obj_expr = self._emit_field_target(target)
             self._line(f"{obj_expr} = {val};")
+        elif isinstance(target, ast.Subscript):
+            # List subscript assignment: lst[i] = v  ->  lst_items[i] = v;
+            val = self._emit_expr(node.value)
+            lhs = self._emit_subscript(target)
+            self._line(f"{lhs} = {val};")
 
     def _emit_ann_assign(self, node: ast.AnnAssign):
         if isinstance(node.target, ast.Name) and node.value is not None:
@@ -763,6 +848,11 @@ class _Emitter:
                 self._line(f"{target} {op}= {val};")
 
     def _emit_expr_stmt(self, node: ast.Expr):
+        # Skip bare string/number literal expressions (Python docstrings, stray
+        # values) — they have no C99-equivalent semantics and a long docstring
+        # can exceed C89's 509-char string literal limit.
+        if isinstance(node.value, ast.Constant):
+            return
         if isinstance(node.value, ast.Call):
             call = node.value
             if isinstance(call.func, ast.Name):
@@ -944,6 +1034,20 @@ class _Emitter:
                 if embedded:
                     self._line(embedded)
                     return
+            # Intercept sfx.load(slot, path) — embed WAV at transpile time
+            if obj_name == "sfx" and method_name == "load" and len(call.args) == 2:
+                slot_expr = self._emit_expr(call.args[0])
+                path_str = self._emit_arg(call.args[1])
+                embedded = self._embed_sfx(slot_expr, path_str)
+                if embedded:
+                    self._line(embedded)
+                    return
+            # Storage methods that accept a list arg need <list>_items expansion.
+            if obj_name == "storage" and method_name in (
+                "save_int_list", "load_int_list",
+            ):
+                self._emit_storage_list_call(call, method_name)
+                return
             args_strs = self._resolve_method_kwargs(call, func)
             args = ", ".join(args_strs)
             self._line(f"{func.c_name}({args});")
@@ -965,12 +1069,78 @@ class _Emitter:
             )
 
         method = obj_type_info.methods[method_name]
+        # Variadic print_at — 3+ positional args (x, y, text1, text2, ...).
+        if method_name == "print_at" and len(call.args) > 3:
+            self._emit_print_at_multi(call, obj_name)
+            return
         args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
             self._line(f"{method.c_name}(&{obj_name}, {args});")
         else:
             self._line(f"{method.c_name}(&{obj_name});")
+
+    def _emit_storage_list_call(self, call: ast.Call, method_name: str):
+        """Emit storage.save_int_list / storage.load_int_list — the list arg
+        expands to `<name>_items, <name>_count` (or `&<name>_count`, capacity)."""
+        if len(call.args) != 2:
+            raise EmitError(
+                f"storage.{method_name}() takes exactly 2 args (name, list)",
+                lineno=call.lineno,
+            )
+        name_arg = self._emit_arg(call.args[0])
+        list_node = call.args[1]
+        if not isinstance(list_node, ast.Name):
+            raise EmitError(
+                f"storage.{method_name}() list arg must be a list variable",
+                lineno=call.lineno,
+            )
+        list_name = list_node.id
+        var = self._get_var_info(list_name)
+        if var is None or var.type != AmipyType.LIST:
+            raise EmitError(
+                f"'{list_name}' is not a list", lineno=call.lineno
+            )
+        if method_name == "save_int_list":
+            self._line(
+                f"amipython_storage_save_int_list({name_arg}, "
+                f"{list_name}_items, {list_name}_count);"
+            )
+        else:  # load_int_list
+            self._line(
+                f"amipython_storage_load_int_list({name_arg}, "
+                f"{list_name}_items, &{list_name}_count, {var.list_capacity});"
+            )
+
+    def _emit_print_at_multi(self, call: ast.Call, obj_name: str):
+        """Emit print_at with >1 text arg using amipython_bitmap_print_at_multi."""
+        x = self._emit_expr(call.args[0])
+        y = self._emit_expr(call.args[1])
+        # Color from kwarg, default 1.
+        color = "1"
+        for kw in call.keywords:
+            if kw.arg == "color":
+                color = self._emit_expr(kw.value)
+        n = len(call.args) - 2
+        pieces = []
+        for a in call.args[2:]:
+            t = self._expr_type(a)
+            expr = self._emit_expr(a)
+            if t == AmipyType.INT:
+                pieces.append(f"amipython_str_int({expr})")
+            elif t == AmipyType.BOOL:
+                pieces.append(f"amipython_str_bool({expr})")
+            elif t == AmipyType.STR:
+                pieces.append(expr)
+            else:
+                raise EmitError(
+                    "print_at text arg must be int, bool or str (floats not yet supported)",
+                    lineno=call.lineno,
+                )
+        self._line(
+            f"amipython_bitmap_print_at_multi(&{obj_name}, {x}, {y}, {color}, "
+            f"{n}, {', '.join(pieces)});"
+        )
 
     def _emit_list_method_stmt(self, call: ast.Call, list_var: VariableInfo):
         """Emit list method call (append, remove)."""
@@ -1357,6 +1527,12 @@ class _Emitter:
             if name == "float":
                 arg = self._emit_expr(node.args[0])
                 return f"(float)({arg})"
+            if name == "str":
+                arg = self._emit_expr(node.args[0])
+                arg_t = self._expr_type(node.args[0])
+                if arg_t == AmipyType.BOOL:
+                    return f"amipython_str_bool({arg})"
+                return f"amipython_str_int({arg})"
             if name == "abs":
                 arg = self._emit_expr(node.args[0])
                 arg_type = self._expr_type(node.args[0])

@@ -141,6 +141,7 @@ void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b);
 void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b);
 void amipython_palette_fade(LONG level);
 BOOL amipython_joy_button(LONG port);
+BOOL amipython_joy_button_pressed(LONG port);
 void amipython_wait_mouse(void);
 void amipython_vwait(LONG n);
 LONG amipython_rnd(LONG n);
@@ -154,6 +155,8 @@ void amipython_collision_register(LONG color, LONG mask);
 void amipython_collision_check(void);
 void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color);
+/* Multi-arg variant — prints n strings space-separated starting at (x,y). */
+void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...);
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel);
 void amipython_sin_table(float *out, LONG n);
 void amipython_cos_table(float *out, LONG n);
@@ -166,6 +169,27 @@ BOOL amipython_joy_left(void);
 BOOL amipython_joy_right(void);
 BOOL amipython_joy_up(void);
 BOOL amipython_joy_down(void);
+BOOL amipython_joy_left_pressed(void);
+BOOL amipython_joy_right_pressed(void);
+BOOL amipython_joy_up_pressed(void);
+BOOL amipython_joy_down_pressed(void);
+BOOL amipython_key_pressed(LONG code);
+BOOL amipython_key_just_pressed(LONG code);
+BOOL amipython_key_just_released(LONG code);
+
+/* Sound effects — one-shot sample playback alongside MOD music.
+ * Samples must be 8-bit signed mono; the transpiler converts WAV at build time. */
+void amipython_sfx_load(LONG slot, const char *path);
+void amipython_sfx_load_embedded(LONG slot, const UBYTE *data, ULONG size, UWORD sample_rate);
+void amipython_sfx_play(LONG slot, LONG channel, LONG volume);
+void amipython_sfx_stop(LONG slot);
+
+/* Persistent storage (PROGDIR:<name>.dat on Amiga, ~/.amipython/<stem>/<name>.dat in preview). */
+void amipython_storage_save_int_list(const char *name, const LONG *items, LONG count);
+BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_out, LONG capacity);
+void amipython_storage_save_str(const char *name, const char *value);
+const char *amipython_storage_load_str(const char *name);
+BOOL amipython_storage_exists(const char *name);
 void amipython_tilemap_init(AmipyTilemap *tm, const UBYTE *tileset_data,
     LONG ts_w, LONG ts_h, LONG ts_bp,
     LONG w, LONG h, LONG bp, LONG tile_size, LONG map_w, LONG map_h);

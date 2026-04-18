@@ -397,6 +397,37 @@ for b in balls:
         assert "x = 10.0" in output
         assert "x = 30.0" in output
 
+    def test_list_subscript_assign(self):
+        output = _compile_and_run('''
+nums: list[int] = []
+for i in range(4):
+    nums.append(i)
+nums[1] = 99
+nums[3] = 77
+for n in nums:
+    print(n)
+''')
+        lines = output.strip().split("\n")
+        assert lines[0].strip() == "0"
+        assert lines[1].strip() == "99"
+        assert lines[2].strip() == "2"
+        assert lines[3].strip() == "77"
+
+    def test_list_subscript_assign_computed_index(self):
+        output = _compile_and_run('''
+board: list[int] = []
+for i in range(6):
+    board.append(0)
+w: int = 3
+for y in range(2):
+    for x in range(3):
+        board[y * w + x] = y * 10 + x
+for v in board:
+    print(v)
+''')
+        lines = output.strip().split("\n")
+        assert [l.strip() for l in lines] == ["0", "1", "2", "10", "11", "12"]
+
     def test_list_struct_mutation(self):
         output = _compile_and_run('''
 from dataclasses import dataclass
@@ -475,3 +506,117 @@ from amiga import music
 music.volume(48)
 ''')
         assert "[music] volume 48" in output
+
+    def test_joy_edge_triggered(self):
+        output = _compile_and_run('''
+from amiga import joy
+a: bool = joy.button_pressed(0)
+b: bool = joy.left_pressed()
+c: bool = joy.right_pressed()
+d: bool = joy.up_pressed()
+e: bool = joy.down_pressed()
+''')
+        assert "[input] joy_button_pressed" in output
+        assert "[input] joy_left_pressed" in output
+        assert "[input] joy_right_pressed" in output
+        assert "[input] joy_up_pressed" in output
+        assert "[input] joy_down_pressed" in output
+
+    def test_str_int_and_int_to_str(self):
+        output = _compile_and_run('''
+from amiga import int_to_str
+a: str = str(42)
+b: str = str(-7)
+c: str = str(True)
+d: str = int_to_str(123, 6)
+e: str = int_to_str(-5, 4)
+print("a:", a)
+print("b:", b)
+print("c:", c)
+print("d:", d)
+print("e:", e)
+''')
+        assert "a: 42" in output
+        assert "b: -7" in output
+        assert "c: True" in output
+        assert "d: 000123" in output
+        assert "e: -005" in output
+
+    def test_sfx_play_stop(self):
+        output = _compile_and_run('''
+from amiga import sfx
+sfx.play(0)
+sfx.play(1, channel=3, volume=48)
+sfx.stop(0)
+''')
+        assert "[sfx] play slot=0 channel=2 volume=64" in output
+        assert "[sfx] play slot=1 channel=3 volume=48" in output
+        assert "[sfx] stop slot=0" in output
+
+    def test_storage_save_load_int_list(self):
+        output = _compile_and_run('''
+from amiga import storage
+
+scores: list[int] = []
+for i in range(4):
+    scores.append(0)
+scores[0] = 100
+scores[1] = 75
+scores[2] = 50
+scores[3] = 25
+
+storage.save_int_list("scores", scores)
+
+# Clear then reload — prove the data round-trips.
+for i in range(4):
+    scores[i] = -1
+storage.load_int_list("scores", scores)
+
+for v in scores:
+    print(v)
+''')
+        lines = [l.strip() for l in output.strip().split("\n") if l.strip().isdigit()]
+        # Last 4 printed values are the reloaded list.
+        assert lines[-4:] == ["100", "75", "50", "25"]
+
+    def test_storage_save_load_str(self):
+        output = _compile_and_run('''
+from amiga import storage
+storage.save_str("name", "RJR")
+s: str = storage.load_str("name")
+print("loaded:", s)
+ok: bool = storage.exists("name")
+print("ok:", ok)
+missing: bool = storage.exists("nope")
+print("missing:", missing)
+''')
+        assert "loaded: RJR" in output
+        assert "ok: 1" in output
+        assert "missing: 0" in output
+
+    def test_print_at_multi_arg(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, wait_mouse
+display = Display(320, 200, bitplanes=3)
+bm = Bitmap(320, 200, bitplanes=3)
+score: int = 1234
+bm.print_at(10, 20, "SCORE", score, color=2)
+bm.print_at(10, 40, "flag", True)
+display.show(bm)
+wait_mouse()
+''')
+        assert '[bitmap] print_at_multi' in output
+        assert '"SCORE"' in output
+        assert '"1234"' in output
+        assert '"True"' in output
+
+    def test_key_module(self):
+        output = _compile_and_run('''
+from amiga import key, K_SPACE, K_P, K_LEFT
+a: bool = key.pressed(K_SPACE)
+b: bool = key.just_pressed(K_P)
+c: bool = key.just_released(K_LEFT)
+''')
+        assert "[input] key_pressed 0x40" in output
+        assert "[input] key_just_pressed 0x19" in output
+        assert "[input] key_just_released 0x4f" in output

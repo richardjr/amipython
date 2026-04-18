@@ -78,6 +78,7 @@ ALLOWED_BUILTINS = frozenset({
     "range",
     "int",
     "float",
+    "str",
     "abs",
     "len",
 })

@@ -260,3 +260,178 @@ def test_music_stop_before_init():
     from amiga._music import _MusicModule
     m = _MusicModule()
     m.stop()  # should not raise
+
+
+def test_joy_button_pressed_is_edge_triggered(monkeypatch):
+    from amiga._joy import _JoyModule
+    j = _JoyModule()
+    state = {"held": False}
+    monkeypatch.setattr(j, "button", lambda port=0: state["held"])
+
+    # Not pressed yet.
+    assert j.button_pressed() is False
+
+    # First frame the button goes down -> True.
+    state["held"] = True
+    assert j.button_pressed() is True
+
+    # Still held on the next frame -> False (edge already consumed).
+    assert j.button_pressed() is False
+    assert j.button_pressed() is False
+
+    # Released then held again -> True on that frame only.
+    state["held"] = False
+    assert j.button_pressed() is False
+    state["held"] = True
+    assert j.button_pressed() is True
+    assert j.button_pressed() is False
+
+
+def test_joy_direction_pressed_is_edge_triggered(monkeypatch):
+    from amiga._joy import _JoyModule
+    j = _JoyModule()
+    state = {"l": False}
+    monkeypatch.setattr(j, "left", lambda: state["l"])
+
+    assert j.left_pressed() is False
+    state["l"] = True
+    assert j.left_pressed() is True
+    assert j.left_pressed() is False  # still held, edge consumed
+    state["l"] = False
+    assert j.left_pressed() is False
+    state["l"] = True
+    assert j.left_pressed() is True
+
+
+def test_key_module_importable():
+    import amiga
+    assert hasattr(amiga, "key")
+    assert amiga.K_SPACE == 0x40
+    assert amiga.K_LEFT == 0x4F
+    assert amiga.K_P == 0x19
+    assert amiga.K_A == 0x20
+
+
+def test_key_just_pressed_and_released(monkeypatch):
+    from amiga._key import _KeyModule, K_SPACE
+    k = _KeyModule()
+    state = {"held": False}
+    monkeypatch.setattr(k, "_held", lambda code: state["held"])
+
+    # Initial: not held, no edge.
+    assert k.just_pressed(K_SPACE) is False
+    assert k.pressed(K_SPACE) is False
+
+    # Press -> just_pressed on first call only.
+    state["held"] = True
+    assert k.just_pressed(K_SPACE) is True
+    assert k.just_pressed(K_SPACE) is False
+    assert k.pressed(K_SPACE) is True
+
+    # Release -> just_released on first call only.
+    state["held"] = False
+    assert k.just_released(K_SPACE) is True
+    assert k.just_released(K_SPACE) is False
+
+
+def test_sfx_module_importable_and_no_crash(tmp_path):
+    """sfx.load/play/stop must be safe to call even when no audio device is available."""
+    import os
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    from amiga import sfx
+    # Missing file — should be a no-op, not a crash.
+    sfx.load(0, str(tmp_path / "missing.wav"))
+    sfx.play(0)
+    sfx.stop(0)
+    # Out-of-range slot — no-op.
+    sfx.play(99)
+    sfx.stop(-1)
+
+
+def test_sfx_load_real_wav(tmp_path, monkeypatch):
+    """Load a real WAV file and ensure the slot ends up populated."""
+    import os, wave
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    wav_path = tmp_path / "tiny.wav"
+    # 100 samples, 8-bit unsigned mono, 11025 Hz, silent.
+    with wave.open(str(wav_path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(1); w.setframerate(11025)
+        w.writeframes(bytes([128] * 100))
+
+    from amiga._sfx import _SfxModule
+    s = _SfxModule()
+    # Fake the caller-dir resolution so load() finds the wav directly.
+    monkeypatch.setattr("inspect.stack",
+                         lambda: [type("F", (), {"filename": str(tmp_path / "x.py")})()] * 2)
+    s.load(0, "tiny.wav")
+    # On systems without a real mixer init we may still be None — allow either.
+    assert 0 in s._sounds
+
+
+def test_storage_int_list_roundtrip(tmp_path, monkeypatch):
+    import amiga._storage as s
+    monkeypatch.setattr(s, "_base_dir", lambda: tmp_path)
+    from amiga import storage
+
+    items = [100, 75, 50, 25, 0]
+    storage.save_int_list("scores", items)
+
+    loaded: list[int] = []
+    ok = storage.load_int_list("scores", loaded)
+    assert ok is True
+    assert loaded == [100, 75, 50, 25, 0]
+
+
+def test_storage_str_roundtrip(tmp_path, monkeypatch):
+    import amiga._storage as s
+    monkeypatch.setattr(s, "_base_dir", lambda: tmp_path)
+    from amiga import storage
+
+    storage.save_str("name", "RJR")
+    assert storage.load_str("name") == "RJR"
+    assert storage.exists("name") is True
+    assert storage.exists("not_there") is False
+    assert storage.load_str("not_there") == ""
+
+
+def test_storage_missing_int_list_returns_false(tmp_path, monkeypatch):
+    import amiga._storage as s
+    monkeypatch.setattr(s, "_base_dir", lambda: tmp_path)
+    from amiga import storage
+
+    existing = [1, 2, 3]
+    ok = storage.load_int_list("nope", existing)
+    assert ok is False
+    assert existing == [1, 2, 3]   # unchanged
+
+
+def test_bitmap_print_at_multi_arg():
+    from amiga import Bitmap
+    bm = Bitmap(320, 200, bitplanes=3)
+    # Should not raise — multi-arg form with mixed types.
+    bm.print_at(10, 20, "SCORE", 1234, True, color=1)
+    bm.print_at(10, 30, "just-one")
+
+
+def test_int_to_str_formatting():
+    from amiga import int_to_str
+    assert int_to_str(0, 0) == "0"
+    assert int_to_str(42, 6) == "000042"
+    assert int_to_str(-5, 4) == "-005"
+    assert int_to_str(1234, 3) == "1234"
+    assert int_to_str(-1234, 6) == "-01234"
+
+
+def test_joy_button_pressed_per_port(monkeypatch):
+    from amiga._joy import _JoyModule
+    j = _JoyModule()
+    held = {0: False, 1: False}
+    monkeypatch.setattr(j, "button", lambda port=0: held[port])
+
+    # Port 0 and port 1 must track independently.
+    held[0] = True
+    assert j.button_pressed(0) is True
+    assert j.button_pressed(1) is False
+    held[1] = True
+    assert j.button_pressed(0) is False  # port 0 already latched
+    assert j.button_pressed(1) is True

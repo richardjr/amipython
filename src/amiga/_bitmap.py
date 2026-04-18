@@ -55,26 +55,40 @@ class Bitmap:
         """Fill the entire surface with colour index 0."""
         self._surface.fill(0)
 
-    def print_at(self, x: int, y: int, text: str, color: int = 1) -> None:
-        """Render text at (x, y) using a built-in 8x8 bitmap font."""
-        if not text:
+    def print_at(self, x: int, y: int, *texts, color: int = 1) -> None:
+        """Render one or more text pieces at (x, y) separated by single-glyph gaps.
+
+        Accepts any number of positional text args (str/int/bool). Non-str args
+        are converted via `str()` — matches transpiled `amipython_str_int` /
+        `amipython_str_bool` behaviour.
+        """
+        if not texts:
             return
         cx = x
-        for ch in text:
-            glyph = _FONT_8X8.get(ch)
-            if glyph is None:
-                glyph = _FONT_8X8.get(' ')
-            if glyph:
-                for row in range(8):
-                    bits = glyph[row]
-                    for col in range(8):
-                        bx, by = cx + col, y + row
-                        if 0 <= bx < self.width and 0 <= by < self.height:
-                            if bits & (0x80 >> col):
-                                self._surface.set_at((bx, by), color)
-                            else:
-                                self._surface.set_at((bx, by), 0)
-            cx += 8
+        for i, piece in enumerate(texts):
+            if isinstance(piece, bool):
+                text = "True" if piece else "False"
+            elif isinstance(piece, (int, float)):
+                text = str(piece)
+            else:
+                text = str(piece)
+            for ch in text:
+                glyph = _FONT_8X8.get(ch)
+                if glyph is None:
+                    glyph = _FONT_8X8.get(' ')
+                if glyph:
+                    for row in range(8):
+                        bits = glyph[row]
+                        for col in range(8):
+                            bx, by = cx + col, y + row
+                            if 0 <= bx < self.width and 0 <= by < self.height:
+                                if bits & (0x80 >> col):
+                                    self._surface.set_at((bx, by), color)
+                                else:
+                                    self._surface.set_at((bx, by), 0)
+                cx += 8
+            if i + 1 < len(texts):
+                cx += 8  # one-glyph-wide separator
 
     @staticmethod
     def load(path: str) -> Bitmap:

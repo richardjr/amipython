@@ -209,6 +209,64 @@ class TestTypecheckPhase3:
         info = _typecheck("from amiga import joy\nx = joy.button(0)")
         assert info.globals["x"].type == AmipyType.BOOL
 
+    def test_joy_button_pressed_type(self):
+        info = _typecheck("from amiga import joy\nx = joy.button_pressed(0)")
+        assert info.globals["x"].type == AmipyType.BOOL
+
+    def test_joy_direction_pressed_types(self):
+        info = _typecheck(
+            "from amiga import joy\n"
+            "a = joy.left_pressed()\n"
+            "b = joy.right_pressed()\n"
+            "c = joy.up_pressed()\n"
+            "d = joy.down_pressed()\n"
+        )
+        for name in ("a", "b", "c", "d"):
+            assert info.globals[name].type == AmipyType.BOOL
+
+    def test_key_constants_are_int(self):
+        info = _typecheck(
+            "from amiga import K_SPACE, K_LEFT, K_P\n"
+            "a: int = K_SPACE\nb: int = K_LEFT\nc: int = K_P\n"
+        )
+        assert info.globals["a"].type == AmipyType.INT
+        assert info.globals["K_SPACE"].type == AmipyType.INT
+
+    def test_key_pressed_returns_bool(self):
+        info = _typecheck(
+            "from amiga import key, K_SPACE\n"
+            "x = key.pressed(K_SPACE)\n"
+            "y = key.just_pressed(K_SPACE)\n"
+            "z = key.just_released(K_SPACE)\n"
+        )
+        for name in ("x", "y", "z"):
+            assert info.globals[name].type == AmipyType.BOOL
+
+    def test_str_int_returns_str(self):
+        info = _typecheck("x: str = str(42)\n")
+        assert info.globals["x"].type == AmipyType.STR
+
+    def test_str_bool_returns_str(self):
+        info = _typecheck("x: str = str(True)\n")
+        assert info.globals["x"].type == AmipyType.STR
+
+    def test_str_float_rejected(self):
+        with pytest.raises(TypeCheckError):
+            _typecheck("x: str = str(1.5)\n")
+
+    def test_int_to_str_returns_str(self):
+        info = _typecheck(
+            "from amiga import int_to_str\n"
+            "x: str = int_to_str(7, 4)\n"
+        )
+        assert info.globals["x"].type == AmipyType.STR
+
+    def test_key_constant_unknown_rejected(self):
+        from amipython.validate import validate
+        from amipython.parse import parse
+        errors = validate(parse("from amiga import K_TOTALLY_FAKE\n"))
+        assert any("K_TOTALLY_FAKE" in str(e) for e in errors)
+
     def test_display_blit_type(self):
         _typecheck(
             "from amiga import Display, Bitmap, Shape\n"
@@ -443,7 +501,7 @@ class TestListOfEngineTypes:
             "from amiga import Bitmap, Shape\n"
             "shapes: list[Shape] = []\n"
         )
-        assert "AmipyShape shapes_items[64];" in c
+        assert "AmipyShape shapes_items[256];" in c
         assert "LONG shapes_count = 0;" in c
 
     def test_list_shape_append_static_method(self):

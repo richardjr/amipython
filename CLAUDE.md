@@ -67,54 +67,89 @@ These must all stay in sync. A feature is not done until it works in all three p
 
 Blitz Basic's numbered-slot model (`BitMap 0`, `Shape 0`) becomes named Python objects. The `run()` function abstracts double buffering, VWait timing, and blit queue management. See `docs/blitz-comparison.md` for 12 side-by-side examples.
 
-Key modules: `Display`, `DualPlayfield`, `Bitmap`, `Shape`, `Sprite`, `Tilemap`, `BlitQueue`, `palette`, `copper`, `collision`, `joy`, `mouse`, `key`, `sound`
+Key modules: `Display`, `Bitmap`, `Shape`, `Sprite`, `Tilemap`, `palette`, `joy`, `mouse`, `collision`, `music`. Planned: `DualPlayfield` (full), `copper`, `key`, `BlitQueue`.
+
+**Asset pipeline.** `Shape.load(path)` and `Bitmap.load(path)` accept PNG / IFF ILBM. At transpile time `assets.py` collects the asset paths from the generated C, converts them to ACE's planar `.bm` format (with colour-0-keyed masks where applicable), and copies them into the build directory. Music loaded via `music.load(path)` is embedded the same way as a raw MOD byte buffer. ADF output (`amipython adf`) packages the binary plus all `data/` files into a bootable 880KB FFS image via amitools `xdftool` (see `adf.py`).
 
 ## Project Structure
 
 ```
 src/
-  amipython/              # Transpiler + build system
-    cli.py                # CLI commands (transpile, build, run, build-ace-image)
-    pipeline.py           # Transpile pipeline
-    validate.py           # AST validator
-    typecheck.py          # Type checker
-    emit.py               # C code emitter
-    engine.py             # Engine type registry (Display, Bitmap, palette, etc.)
-    types.py              # Type system
-    docker.py             # Docker cross-compilation
-    amiberry.py           # Amiberry launcher
-    c_runtime/            # C headers and implementations
-      amipython.h         # Core runtime (print, math, types)
-      amipython_engine.h  # Engine struct definitions + function declarations
-      amipython_engine_amiga.c  # Real ACE implementation + vbcc trace stubs
-      amipython_engine_host.c   # Host gcc printf trace stubs
-  amiga/                  # Python preview module (pygame-ce)
-    __init__.py           # Public API exports
-    _backend.py           # Pygame singleton (window, palette, events, clock)
-    _bitmap.py            # Bitmap with 8-bit indexed surface
-    _display.py           # Display — lazy window on show()
-    _palette.py           # OCS 12-bit palette emulation
-    _builtins.py          # wait_mouse(), vwait()
-    _constants.py         # PAL_FPS, MAX_PALETTE, DEFAULT_SCALE
-examples/                 # Example scripts (runnable with both python and amipython)
-  basic/                  # Simple display, palette
-  drawing/                # Drawing primitives
-  animation/              # Bobs, double buffering
-  sprites/                # Hardware sprites
-  scrolling/              # Scrolling, tilemaps, dual playfield
-  effects/                # Copper, starfields, particles
-  input/                  # Joystick, mouse, keyboard
-docs/                     # Documentation
-  preview.md              # Python preview setup and usage
-  language.md             # Supported Python subset, type system, engine imports
-  blitz-comparison.md     # 12 side-by-side Blitz→amipython examples + feature tables
-  amiberry.md             # Emulator setup, KS 3.1 requirement, troubleshooting
-  architecture.md         # Design decisions, cross-compilation, prior art
-docker/                   # Docker build files
-  Dockerfile.ace          # Bebbo's GCC + ACE engine image
-  patch_ace.py            # Patches ACE for CLI launch compatibility
-amiberry_boot/            # Minimal Amiga boot drive (no Workbench)
-  S/Startup-Sequence      # Dynamically written by amipython run
+  amipython/                      # Transpiler + build system
+    __main__.py                   # `python -m amipython` entry point
+    cli.py                        # Click CLI (transpile, build, run, adf, build-ace-image)
+    pipeline.py                   # Orchestrates parse → validate → typecheck → emit → assets
+    parse.py                      # Thin wrapper around ast.parse with ParseError reporting
+    validate.py                   # AST validator — rejects unsupported Python features
+    typecheck.py                  # Type checker — implicit static typing, struct/list inference
+    emit.py                       # C89 code emitter
+    engine.py                     # Engine type registry (Display, Bitmap, Shape, Sprite, Tilemap, palette, joy, mouse, music, collision, builtins)
+    types.py                      # AmipyType enum + VariableInfo / StructInfo
+    errors.py                     # Exception types (ParseError, ValidationError, TypeCheckError, EmitError, BuildError)
+    assets.py                     # PNG/IFF → ACE .bm planar bitmap conversion + mask generation
+    adf.py                        # 880KB ADF floppy image creation via amitools xdftool
+    docker.py                     # Docker cross-compilation orchestration (vbcc and ACE images)
+    amiberry.py                   # Amiberry launcher — generates .uae config, mounts binary dir
+    c_runtime/                    # C headers and implementations (copied beside generated .c)
+      amipython.h                 # Core runtime (print, math, types, list helpers)
+      amipython_engine.h          # Engine struct definitions + function declarations
+      amipython_engine_amiga.c    # Real ACE implementation (built into Amiga binary)
+      amipython_engine_host.c     # Host gcc printf trace stubs (used by host compile tests)
+      CMakeLists.txt              # ACE build config (copied beside generated .c for Docker build)
+  amiga/                          # Python preview module (pygame-ce)
+    __init__.py                   # Public API exports — what `from amiga import ...` resolves to
+    _backend.py                   # Pygame singleton (window, palette, events, 50fps clock, sprite/tilemap registry)
+    _bitmap.py                    # Bitmap with 8-bit indexed surface, drawing primitives, Bitmap.load()
+    _display.py                   # Display — lazy window on show(), blit, sprites_behind
+    _palette.py                   # OCS 12-bit palette emulation (.aga / .set / .fade)
+    _shape.py                     # Shape — grab/load, transparent index 0 for blits
+    _sprite.py                    # Sprite — hardware sprite emulation (.grab/.show/.move)
+    _tilemap.py                   # Tilemap — tile-based scrolling display, blocking tiles, pending blits
+    _joy.py                       # Joystick — button/left/right/up/down (port 0 mouse, port 1 keyboard)
+    _mouse.py                     # Mouse — x/y position, set_pointer for sprite-attached cursor
+    _collision.py                 # Collision detection — playfield colour register/check
+    _music.py                     # ProTracker MOD playback via pygame.mixer (load/play/stop/volume)
+    _builtins.py                  # wait_mouse(), vwait(n), rnd(n), run(update, until=), sin_table, cos_table
+    _constants.py                 # PAL_FPS=50, MAX_PALETTE=256, DEFAULT_SCALE=3
+examples/                         # Example scripts (runnable with both `python` and `amipython`)
+  hello.py                        # CLI hello world (Phase 1 — vbcc/vamos path, no engine)
+  basic/                          # display1, minimal_display, palette_bars
+  drawing/                        # mouse_lines, polygon, random_circles
+  animation/                      # bouncing_ball, bouncing_blits, doublebuffer_balls, qblit_balls, orbiting_ball, vector_stars_3d, bounce_int
+  sprites/                        # sprite_move, sprite_priority, sprite_collision
+  scrolling/                      # smooth_scroll, momentum_scroll, tilemap_scroll, tile_scroll_doublebuffer, dual_playfield, dual_playfield_auto
+  effects/                        # copper_gradient, copper_lines, triple_layer_copper, starfield_horizontal, starfield_radial, pixel_explosion, equaliser
+  input/                          # joystick_mouse, keyboard_status, keyboard_typing
+  palette/                        # fade
+  sound/                          # music (MOD playback via ptplayer / pygame.mixer)
+  demo/                           # amipython_demo, logo, logo_grab, starfield_nologo, generate_assets — combined showpiece + asset generation script
+docs/                             # Documentation
+  preview.md                      # Python preview setup, usage, supported API table, palette fidelity
+  language.md                     # Supported Python subset, data types, engine imports, builtins
+  blitz-comparison.md             # 12 side-by-side Blitz Basic → amipython examples + full feature coverage tables
+  amiberry.md                     # Emulator setup, KS 3.1 requirement, ADF flow, troubleshooting
+  architecture.md                 # Build system, cross-compilation paths, design decisions, prior art
+  credits.md                      # Acknowledgements for ACE, ptplayer, GCC/vbcc, demo MOD/logo assets
+  devlog.md                       # Dated technical notes — problems hit, root causes, and solutions
+docker/                           # Docker build files
+  Dockerfile.ace                  # Bebbo's GCC + ACE engine image (`amipython-ace`)
+  patch_ace.py                    # Patches ACE source: removes `_ace_dbg`, guards `_WBenchMsg` NULL deref
+amiberry/                         # Sample Amiberry config (reference)
+  example.uae                     # Example UAE config showing the layout `amipython run` generates
+amiberry_boot/                    # Minimal Amiga boot drive (no Workbench)
+  S/Startup-Sequence              # Dynamically written by `amipython run` to launch the binary
+tests/                            # Pytest suite
+  fixtures/                       # Reference Python sources + expected C output (hello, arithmetic, control_flow, functions, display1)
+  test_validate.py                # Validator (accepts/rejects Python features)
+  test_typecheck.py               # Type checker (inference, structs, lists)
+  test_emit.py                    # C emitter (golden output comparisons)
+  test_engine.py                  # Engine registry consistency
+  test_pipeline.py                # End-to-end transpile pipeline
+  test_assets.py                  # PNG → ACE .bm conversion
+  test_adf.py                     # ADF floppy image creation
+  test_compile_host.py            # Host gcc compile of generated C (default test target)
+  test_compile_amiga.py           # Docker cross-compile via vbcc / ACE (marker: `pytest -m docker`)
+  test_amiga_preview.py           # Pygame preview module behaviour
 ```
 
 ## Cross-Compilation
@@ -142,11 +177,13 @@ pytest -m docker                     # Docker cross-compilation tests only
 
 ## Implementation Phases
 
-1. **Phase 1** — Transpiler core (done): parse Python subset, emit C89, end-to-end hello world
-2. **Phase 2** — Display + drawing (done): Display, Bitmap, primitives, palette, Python preview module
-3. **Phase 3** — Game loop + sprites/bobs: run(), double buffer, Shape, Sprite
-4. **Phase 4** — Input + scrolling: joy, key, mouse, Tilemap
-5. **Phase 5** — Copper, collision, dual playfield, audio
+1. **Phase 1** — Transpiler core (done): parse Python subset, emit C89, end-to-end hello world via vbcc/vamos
+2. **Phase 2** — Display + drawing (done): `Display`, `Bitmap`, primitives, palette, Python preview module
+3. **Phase 3** — Game loop + sprites/bobs (done): `run()`, double buffer, `Shape.grab/load`, `display.blit`, `joy.button`, `rnd`
+4. **Phase 4** — Classes + lists + scrolling (done): `@dataclass` structs, `list[T]`, field access, iteration, `len`, `append`, `remove`, `sin_table`, `cos_table`, `box_filled`, ADF floppy output, `Tilemap`, sprite collision
+5. **Phase 5A** — Image/asset loading (done): `Shape.load("data/x.png")`, `Bitmap.load(...)`, PNG/IFF → ACE `.bm` at build time, mask auto-generated from colour 0
+6. **Phase 5B** — Music (done): `music.load/play/stop/volume`, MOD embedded at transpile time, ACE ptplayer + pygame.mixer
+7. **Phase 5 (remaining)** — Copper effects (per-scanline palette), full dual playfield, keyboard input
 
 ## vbcc Cross-Compilation Notes
 
