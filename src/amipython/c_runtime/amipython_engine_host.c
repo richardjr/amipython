@@ -48,6 +48,11 @@ void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LON
     (void)bm;
 }
 
+void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    printf("[bitmap] clear_rect %ld,%ld %ldx%ld\n", x, y, w, h);
+    (void)bm;
+}
+
 void amipython_bitmap_clear(AmipyBitmap *bm) {
     printf("[bitmap] clear %ux%u\n", bm->width, bm->height);
 }
@@ -135,6 +140,15 @@ LONG amipython_rnd(LONG n) {
     return n > 0 ? (LONG)(rand() % n) : 0;
 }
 
+void amipython_shuffle(LONG *items, LONG count) {
+    LONG i, j, tmp;
+    for (i = count - 1; i > 0; i--) {
+        j = amipython_rnd(i + 1);
+        tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+    }
+    printf("[shuffle] count=%ld\n", count);
+}
+
 LONG amipython_mouse_x(void) {
     printf("[input] mouse_x\n");
     return 160;
@@ -198,6 +212,40 @@ void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color
     for (i = 0; i < n; i++) {
         const char *s = va_arg(ap, const char *);
         if (!s) s = "";
+        printf(" \"%s\"", s);
+    }
+    printf("\n");
+    va_end(ap);
+    (void)bm;
+}
+
+void amipython_bitmap_print_centered(AmipyBitmap *bm, LONG y, const char *text, LONG color) {
+    printf("[bitmap] print_centered y=%ld color=%ld \"%s\"\n", y, color, text);
+    (void)bm;
+}
+void amipython_bitmap_print_centered_multi(AmipyBitmap *bm, LONG y, LONG color, LONG n, ...) {
+    va_list ap; LONG i;
+    va_start(ap, n);
+    printf("[bitmap] print_centered_multi y=%ld color=%ld:", y, color);
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *); if (!s) s = "";
+        printf(" \"%s\"", s);
+    }
+    printf("\n");
+    va_end(ap);
+    (void)bm;
+}
+void amipython_bitmap_print_right(AmipyBitmap *bm, LONG x_right, LONG y, const char *text, LONG color) {
+    printf("[bitmap] print_right x_right=%ld y=%ld color=%ld \"%s\"\n",
+           x_right, y, color, text);
+    (void)bm;
+}
+void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, LONG color, LONG n, ...) {
+    va_list ap; LONG i;
+    va_start(ap, n);
+    printf("[bitmap] print_right_multi x_right=%ld y=%ld color=%ld:", x_right, y, color);
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *); if (!s) s = "";
         printf(" \"%s\"", s);
     }
     printf("\n");

@@ -44,6 +44,13 @@ def rnd(n: int) -> int:
     return random.randint(0, n - 1)
 
 
+def shuffle(lst) -> None:
+    """Fisher-Yates shuffle in place."""
+    for i in range(len(lst) - 1, 0, -1):
+        j = random.randint(0, i)
+        lst[i], lst[j] = lst[j], lst[i]
+
+
 def int_to_str(n: int, width: int = 0) -> str:
     """Return a zero-padded decimal string of `n`, at least `width` chars.
 

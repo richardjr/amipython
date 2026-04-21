@@ -864,10 +864,14 @@ class _Emitter:
                         and "run" in self.info.engine_imports):
                     self._emit_run(call)
                     return
-                # Engine builtin: wait_mouse(), vwait(), rnd()
+                # Engine builtin: wait_mouse(), vwait(), rnd(), shuffle()
                 if (call.func.id in BUILTINS
                         and call.func.id in self.info.engine_imports):
                     builtin = BUILTINS[call.func.id]
+                    # shuffle(lst) — expand the list arg to <name>_items, <name>_count
+                    if call.func.id == "shuffle":
+                        self._emit_shuffle(call)
+                        return
                     args = ", ".join(self._emit_expr(a) for a in call.args)
                     self._line(f"{builtin.c_name}({args});")
                     return
@@ -1073,12 +1077,42 @@ class _Emitter:
         if method_name == "print_at" and len(call.args) > 3:
             self._emit_print_at_multi(call, obj_name)
             return
+        # Variadic print_centered — (y, text1, text2, ...).
+        if method_name == "print_centered" and len(call.args) > 2:
+            self._emit_print_variadic(call, obj_name,
+                                       "amipython_bitmap_print_centered_multi",
+                                       leading=1)
+            return
+        # Variadic print_right — (x_right, y, text1, text2, ...).
+        if method_name == "print_right" and len(call.args) > 3:
+            self._emit_print_variadic(call, obj_name,
+                                       "amipython_bitmap_print_right_multi",
+                                       leading=2)
+            return
         args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
             self._line(f"{method.c_name}(&{obj_name}, {args});")
         else:
             self._line(f"{method.c_name}(&{obj_name});")
+
+    def _emit_shuffle(self, call: ast.Call):
+        """Emit shuffle(lst) as amipython_shuffle(lst_items, lst_count)."""
+        if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
+            raise EmitError(
+                "shuffle() takes exactly one list-variable argument",
+                lineno=call.lineno,
+            )
+        list_name = call.args[0].id
+        var = self._get_var_info(list_name)
+        if var is None or var.type != AmipyType.LIST:
+            raise EmitError(f"'{list_name}' is not a list", lineno=call.lineno)
+        if var.list_element_type != AmipyType.INT:
+            raise EmitError(
+                "shuffle() only supports list[int] for v1",
+                lineno=call.lineno,
+            )
+        self._line(f"amipython_shuffle({list_name}_items, {list_name}_count);")
 
     def _emit_storage_list_call(self, call: ast.Call, method_name: str):
         """Emit storage.save_int_list / storage.load_int_list — the list arg
@@ -1111,6 +1145,37 @@ class _Emitter:
                 f"amipython_storage_load_int_list({name_arg}, "
                 f"{list_name}_items, &{list_name}_count, {var.list_capacity});"
             )
+
+    def _emit_print_variadic(self, call: ast.Call, obj_name: str,
+                                c_func: str, leading: int):
+        """Emit print_centered / print_right variadic calls.
+
+        `leading` is the number of non-text positional args (1 for
+        print_centered = y, 2 for print_right = x_right, y).
+        """
+        leading_args = [self._emit_expr(a) for a in call.args[:leading]]
+        color = "1"
+        for kw in call.keywords:
+            if kw.arg == "color":
+                color = self._emit_expr(kw.value)
+        n = len(call.args) - leading
+        pieces = []
+        for a in call.args[leading:]:
+            t = self._expr_type(a)
+            expr = self._emit_expr(a)
+            if t == AmipyType.INT:
+                pieces.append(f"amipython_str_int({expr})")
+            elif t == AmipyType.BOOL:
+                pieces.append(f"amipython_str_bool({expr})")
+            elif t == AmipyType.STR:
+                pieces.append(expr)
+            else:
+                raise EmitError(
+                    "print text arg must be int, bool or str",
+                    lineno=call.lineno,
+                )
+        args = ", ".join(leading_args + [color, str(n)] + pieces)
+        self._line(f"{c_func}(&{obj_name}, {args});")
 
     def _emit_print_at_multi(self, call: ast.Call, obj_name: str):
         """Emit print_at with >1 text arg using amipython_bitmap_print_at_multi."""

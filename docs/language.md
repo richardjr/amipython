@@ -240,7 +240,8 @@ bm.circle_filled(cx, cy, r, color)     # filled circle
 bm.box_filled(x1, y1, x2, y2, color)   # filled rectangle
 bm.plot(x, y, color)                    # single pixel
 bm.line(x1, y1, x2, y2, color)          # single-pixel line
-bm.clear()                              # fill with colour 0
+bm.clear()                              # fill entire bitmap with colour 0
+bm.clear_rect(x, y, w, h)               # fill one region with colour 0
 ```
 
 ### Text Rendering
@@ -254,6 +255,11 @@ bm.print_at(10, 20, "HELLO")                            # single string
 bm.print_at(10, 20, "HELLO", color=2)                   # with color
 bm.print_at(10, 20, "SCORE", score, "lines", lines)     # multi-arg, mixed types
 bm.print_at(10, 40, "SCORE", int_to_str(score, 6))      # zero-padded score
+
+bm.print_centered(40, "AMITETRIS")                      # horizontally centered
+bm.print_centered(80, "SCORE", int_to_str(score, 6))    # centered, multi-arg
+
+bm.print_right(300, 100, "final", int_to_str(score, 6)) # right edge at x=300
 ```
 
 - Positional args after `x, y` accept `str`, `int`, or `bool` — int/bool are
@@ -529,6 +535,7 @@ wait_mouse()            # wait for left mouse button click
 vwait(1)                # wait for 1 vertical blank (1/50th second)
 vwait(3)                # wait for 3 vertical blanks (slower animation)
 rnd(100)                # random integer 0-99
+shuffle(lst)            # Fisher-Yates shuffle a list[int] in place
 int_to_str(42, 6)       # zero-padded decimal: "000042" (for scores, counters)
 int_to_str(-5, 4)       # sign-preserving: "-005"
 sin_table(720)          # list of 720 pre-computed sin values (0 to 2*pi)

@@ -811,25 +811,33 @@ class _TypeChecker(ast.NodeVisitor):
     def _check_method_args(self, node: ast.Call, method, label: str):
         """Validate positional + keyword args for an EngineMethod."""
         n_positional = len(method.params)
-        # print_at is variadic in the text args — accepts 3+ positional args,
-        # where args[2:] are the text pieces to render space-separated.
-        if method.name == "print_at":
+        # print_at / print_centered / print_right are variadic in the text
+        # args. Leading = number of required non-text positional args:
+        #   print_at        → 2 (x, y)
+        #   print_centered  → 1 (y)
+        #   print_right     → 2 (x_right, y)
+        variadic_leading = {
+            "print_at": 2,
+            "print_centered": 1,
+            "print_right": 2,
+        }
+        if method.name in variadic_leading:
+            leading = variadic_leading[method.name]
             if len(node.args) < n_positional:
                 raise TypeCheckError(
                     f"'{label}()' expects at least {n_positional} positional "
                     f"arguments, got {len(node.args)}",
                     lineno=node.lineno,
                 )
-            # Type-check each arg (x/y int, text args any of int/float/bool/str).
             for i, arg in enumerate(node.args):
                 t = self._infer(arg)
-                if i < 2 and t != AmipyType.INT:
+                if i < leading and t != AmipyType.INT:
                     raise TypeCheckError(
-                        f"'{label}()' argument {i + 1} (x/y) must be int, got {t.name}",
+                        f"'{label}()' argument {i + 1} must be int, got {t.name}",
                         lineno=node.lineno,
                     )
-                if i >= 2 and t not in (AmipyType.INT, AmipyType.FLOAT,
-                                        AmipyType.BOOL, AmipyType.STR):
+                if i >= leading and t not in (AmipyType.INT, AmipyType.FLOAT,
+                                              AmipyType.BOOL, AmipyType.STR):
                     raise TypeCheckError(
                         f"'{label}()' text args must be int, float, bool or str",
                         lineno=node.lineno,

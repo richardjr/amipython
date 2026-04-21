@@ -32,7 +32,7 @@ from amiga._key import (
     K_0, K_1, K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9,
     K_LEFT, K_RIGHT, K_UP, K_DOWN, K_SPACE, K_RETURN, K_ESC,
 )
-from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table, int_to_str
+from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table, int_to_str, shuffle
 
 __all__ = [
     "Display",
@@ -61,4 +61,5 @@ __all__ = [
     "sin_table",
     "cos_table",
     "int_to_str",
+    "shuffle",
 ]

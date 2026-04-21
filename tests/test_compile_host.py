@@ -594,6 +594,54 @@ print("missing:", missing)
         assert "ok: 1" in output
         assert "missing: 0" in output
 
+    def test_print_centered_and_right(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, wait_mouse
+display = Display(320, 200, bitplanes=3)
+bm = Bitmap(320, 200, bitplanes=3)
+score: int = 42
+bm.print_centered(40, "TITLE")
+bm.print_centered(80, "SCORE", score)
+bm.print_right(300, 100, "final")
+bm.print_right(300, 120, "lines", 150)
+display.show(bm)
+wait_mouse()
+''')
+        assert '[bitmap] print_centered y=40' in output
+        assert 'TITLE' in output
+        assert '[bitmap] print_centered_multi y=80' in output
+        assert '[bitmap] print_right x_right=300 y=100' in output
+        assert '[bitmap] print_right_multi x_right=300 y=120' in output
+
+    def test_shuffle_builtin(self):
+        output = _compile_and_run('''
+from amiga import shuffle
+bag: list[int] = []
+for i in range(7):
+    bag.append(i)
+shuffle(bag)
+# After shuffle the multiset is preserved.
+total: int = 0
+for v in bag:
+    total = total + v
+print("total =", total)
+print("count =", len(bag))
+''')
+        assert "total = 21" in output   # 0+1+...+6
+        assert "count = 7" in output
+        assert "[shuffle] count=7" in output
+
+    def test_clear_rect(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, wait_mouse
+display = Display(320, 200, bitplanes=3)
+bm = Bitmap(320, 200, bitplanes=3)
+bm.clear_rect(10, 20, 30, 40)
+display.show(bm)
+wait_mouse()
+''')
+        assert "[bitmap] clear_rect 10,20 30x40" in output
+
     def test_print_at_multi_arg(self):
         output = _compile_and_run('''
 from amiga import Display, Bitmap, wait_mouse

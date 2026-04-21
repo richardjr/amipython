@@ -131,6 +131,7 @@ void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp);
 void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, LONG color);
 void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
 void amipython_bitmap_clear(AmipyBitmap *bm);
+void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color);
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
 void amipython_shape_load(AmipyShape *shape, const char *path);
@@ -157,6 +158,12 @@ void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, 
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color);
 /* Multi-arg variant — prints n strings space-separated starting at (x,y). */
 void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...);
+/* Single-string centered (1-arg convenience — variadic multi-arg is emitted
+ * via amipython_bitmap_print_centered_multi by the transpiler). */
+void amipython_bitmap_print_centered(AmipyBitmap *bm, LONG y, const char *text, LONG color);
+void amipython_bitmap_print_centered_multi(AmipyBitmap *bm, LONG y, LONG color, LONG n, ...);
+void amipython_bitmap_print_right(AmipyBitmap *bm, LONG x_right, LONG y, const char *text, LONG color);
+void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, LONG color, LONG n, ...);
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel);
 void amipython_sin_table(float *out, LONG n);
 void amipython_cos_table(float *out, LONG n);
@@ -176,6 +183,9 @@ BOOL amipython_joy_down_pressed(void);
 BOOL amipython_key_pressed(LONG code);
 BOOL amipython_key_just_pressed(LONG code);
 BOOL amipython_key_just_released(LONG code);
+
+/* Fisher-Yates shuffle in place (int lists only for v1). */
+void amipython_shuffle(LONG *items, LONG count);
 
 /* Sound effects — one-shot sample playback alongside MOD music.
  * Samples must be 8-bit signed mono; the transpiler converts WAV at build time. */

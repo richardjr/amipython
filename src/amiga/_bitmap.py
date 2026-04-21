@@ -55,6 +55,63 @@ class Bitmap:
         """Fill the entire surface with colour index 0."""
         self._surface.fill(0)
 
+    def clear_rect(self, x: int, y: int, w: int, h: int) -> None:
+        """Fill a rectangular region with colour index 0."""
+        if w <= 0 or h <= 0:
+            return
+        rect = pygame.Rect(x, y, w, h).clip(self._surface.get_rect())
+        if rect.w > 0 and rect.h > 0:
+            self._surface.fill(0, rect)
+
+    def _render_pieces(self, cx: int, y: int, pieces, color: int) -> None:
+        """Internal: render a sequence of text pieces at the given cursor x."""
+        for i, piece in enumerate(pieces):
+            if isinstance(piece, bool):
+                text = "True" if piece else "False"
+            else:
+                text = str(piece)
+            for ch in text:
+                glyph = _FONT_8X8.get(ch) or _FONT_8X8.get(' ')
+                if glyph:
+                    for row in range(8):
+                        bits = glyph[row]
+                        for col in range(8):
+                            bx, by = cx + col, y + row
+                            if 0 <= bx < self.width and 0 <= by < self.height:
+                                if bits & (0x80 >> col):
+                                    self._surface.set_at((bx, by), color)
+                                else:
+                                    self._surface.set_at((bx, by), 0)
+                cx += 8
+            if i + 1 < len(pieces):
+                cx += 8
+
+    def _pieces_width(self, pieces) -> int:
+        total = 0
+        for i, piece in enumerate(pieces):
+            if isinstance(piece, bool):
+                text = "True" if piece else "False"
+            else:
+                text = str(piece)
+            total += len(text) * 8
+            if i + 1 < len(pieces):
+                total += 8
+        return total
+
+    def print_centered(self, y: int, *texts, color: int = 1) -> None:
+        """Render one or more text pieces centered horizontally at row y."""
+        if not texts:
+            return
+        x = (self.width - self._pieces_width(texts)) // 2
+        self._render_pieces(x, y, texts, color)
+
+    def print_right(self, x_right: int, y: int, *texts, color: int = 1) -> None:
+        """Render text pieces right-aligned so the last glyph ends at x_right."""
+        if not texts:
+            return
+        x = x_right - self._pieces_width(texts)
+        self._render_pieces(x, y, texts, color)
+
     def print_at(self, x: int, y: int, *texts, color: int = 1) -> None:
         """Render one or more text pieces at (x, y) separated by single-glyph gaps.
 

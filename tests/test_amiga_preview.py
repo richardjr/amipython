@@ -405,6 +405,61 @@ def test_storage_missing_int_list_returns_false(tmp_path, monkeypatch):
     assert existing == [1, 2, 3]   # unchanged
 
 
+def test_print_centered_positions_correctly():
+    from amiga import Bitmap, palette
+    palette.set(1, 15, 15, 15)
+    bm = Bitmap(80, 16, bitplanes=3)
+    # "AB" = 2 chars × 8px = 16px wide. Centered in 80 px → starts at x = 32.
+    bm.print_centered(4, "AB", color=1)
+    # Pixel outside the text area should be 0; pixel inside should be 1.
+    # "A" glyph first row has set bits in the middle.
+    # It's easier to just check that SOME pixel in columns 32..47 is set.
+    has_lit = any(bm._surface.get_at((x, 4 + 2))[:3] != (0, 0, 0)
+                  for x in range(32, 48))
+    assert has_lit
+    # And that nothing was drawn before x=32.
+    for x in range(0, 32):
+        assert bm._surface.get_at((x, 4 + 2))[:3] == (0, 0, 0)
+
+
+def test_print_right_positions_correctly():
+    from amiga import Bitmap, palette
+    palette.set(1, 15, 15, 15)
+    bm = Bitmap(80, 16, bitplanes=3)
+    # "HI" = 16 px wide. print_right(64, 0, "HI") → text spans x=48..63.
+    bm.print_right(64, 0, "HI", color=1)
+    # Last glyph must end at or before x=64. Something lit in [48,64).
+    has_lit = any(bm._surface.get_at((x, 2))[:3] != (0, 0, 0)
+                  for x in range(48, 64))
+    assert has_lit
+    for x in range(64, 80):
+        assert bm._surface.get_at((x, 2))[:3] == (0, 0, 0)
+
+
+def test_shuffle_preserves_multiset():
+    from amiga import shuffle
+    lst = list(range(20))
+    shuffle(lst)
+    assert sorted(lst) == list(range(20))
+
+
+def test_bitmap_clear_rect():
+    from amiga import Bitmap, palette
+    palette.set(0, 0, 0, 0)   # index 0 = black
+    palette.set(5, 15, 0, 0)  # index 5 = red — distinct from 0
+    bm = Bitmap(64, 32, bitplanes=3)
+    bm.box_filled(0, 0, 63, 31, 5)
+    bm.clear_rect(5, 5, 20, 20)
+    inside = bm._surface.get_at((10, 10))[:3]
+    outside = bm._surface.get_at((40, 20))[:3]
+    assert inside == (0, 0, 0)
+    assert outside[0] > 0   # red component non-zero
+    # Clamping — off-screen clear should be a no-op, not a crash.
+    bm.clear_rect(-50, -50, 10, 10)
+    bm.clear_rect(1000, 1000, 10, 10)
+    bm.clear_rect(0, 0, 0, 0)
+
+
 def test_bitmap_print_at_multi_arg():
     from amiga import Bitmap
     bm = Bitmap(320, 200, bitplanes=3)

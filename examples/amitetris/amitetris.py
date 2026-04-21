@@ -1,4 +1,4 @@
-"""amitetris — a basic Tetris clone built on amipython Stage 1 features.
+"""amitetris — basic Tetris clone built on amipython Stage 1 + Stage 2 features.
 
 Scenes: TITLE → PLAY → GAMEOVER → TITLE.
 
@@ -8,15 +8,20 @@ Controls:
     Down arrow          — soft drop (held).
     Fire (Space / LMB)  — hard drop (edge-triggered); also starts / confirms.
     P                   — pause.
-    ESC                 — exit current scene (play → game over, title → quit).
+    ESC                 — abandon current game.
 
-High scores persist across runs:
-    preview: ~/.amipython/amitetris/scores.dat
-    Amiga:   PROGDIR:scores.dat
+High scores persist to PROGDIR:scores.dat (Amiga) or
+~/.amipython/amitetris/scores.dat (preview).
+
+Stage-2 features used:
+    shuffle()            — 7-bag piece randomiser
+    bm.print_centered    — title, pause, game-over banners
+    bm.print_right       — right-aligned score-panel values
+    bm.clear_rect        — region redraws (panel values, pause banner, next preview)
 """
 
 from amiga import Display, Bitmap, palette, run
-from amiga import joy, key, rnd, int_to_str, storage
+from amiga import joy, key, int_to_str, shuffle, storage
 from amiga import K_P, K_ESC
 
 # --- Geometry ---
@@ -27,11 +32,8 @@ BOARD_X: int = 120
 BOARD_Y: int = 20
 PANEL_X: int = 210
 
-# --- Piece data: 7 pieces × 4 rotations × 4 cells. Each cell is an index
-# 0..15 into a 4x4 grid (row = idx // 4, col = idx % 4). Flat layout so the
-# transpiler can store it as a single `list[int]`. ---
+# --- Piece data: 7 pieces × 4 rotations × 4 cells, each cell index 0..15. ---
 piece_data: list[int] = []
-
 # I
 piece_data.append(4); piece_data.append(5); piece_data.append(6); piece_data.append(7)
 piece_data.append(2); piece_data.append(6); piece_data.append(10); piece_data.append(14)
@@ -69,10 +71,16 @@ piece_data.append(0); piece_data.append(1); piece_data.append(2); piece_data.app
 piece_data.append(0); piece_data.append(1); piece_data.append(5); piece_data.append(9)
 
 
-# --- Board: flat int list, 0 = empty, 1..7 = piece index + 1 (= palette index) ---
+# --- Board: flat int list. 0 = empty, 1..7 = piece index + 1 = palette colour. ---
 board: list[int] = []
 for i in range(W * H):
     board.append(0)
+
+# --- 7-bag randomiser state: bag[0..6] reshuffled every time it empties. ---
+bag: list[int] = []
+for i in range(7):
+    bag.append(i)
+bag_pos: int = 7   # forces initial fill on first draw
 
 # --- Scenes ---
 SCENE_TITLE: int = 0
@@ -96,12 +104,12 @@ lines_cleared: int = 0
 level: int = 1
 drop_counter: int = 0
 paused: bool = False
-
+prev_paused: bool = False
 prev_score: int = -1
 prev_lines: int = -1
 prev_level: int = -1
 
-# --- Top-5 high scores (persisted) ---
+# --- Top-5 high scores ---
 top_scores: list[int] = []
 for i in range(5):
     top_scores.append(0)
@@ -112,20 +120,34 @@ storage.load_int_list("scores", top_scores)
 display = Display(320, 200, bitplanes=3)
 screen = Bitmap(320, 200, bitplanes=3)
 
-palette.aga(0, 10, 10, 30)     # dark blue background
-palette.aga(1, 60, 220, 240)   # I  — cyan
-palette.aga(2, 240, 220, 40)   # O  — yellow
-palette.aga(3, 200, 80, 240)   # T  — purple
-palette.aga(4, 40, 220, 60)    # S  — green
-palette.aga(5, 240, 60, 60)    # Z  — red
-palette.aga(6, 240, 140, 40)   # L  — orange
-palette.aga(7, 60, 100, 240)   # J  — blue
+palette.aga(0, 10, 10, 30)
+palette.aga(1, 60, 220, 240)   # I
+palette.aga(2, 240, 220, 40)   # O
+palette.aga(3, 200, 80, 240)   # T
+palette.aga(4, 40, 220, 60)    # S
+palette.aga(5, 240, 60, 60)    # Z
+palette.aga(6, 240, 140, 40)   # L
+palette.aga(7, 60, 100, 240)   # J
 
 display.show(screen)
 
 
 # ================================================================
-# Utilities
+# 7-bag randomiser
+# ================================================================
+
+def draw_next_from_bag() -> int:
+    global bag_pos
+    if bag_pos >= 7:
+        shuffle(bag)
+        bag_pos = 0
+    v: int = bag[bag_pos]
+    bag_pos = bag_pos + 1
+    return v
+
+
+# ================================================================
+# Piece / board utilities
 # ================================================================
 
 def piece_cell(p: int, r: int, i: int) -> int:
@@ -163,7 +185,6 @@ def clear_lines() -> int:
             if board[y * W + x] == 0:
                 full = False
         if full:
-            # Shift everything above down by one row.
             yy: int = y
             while yy > 0:
                 for x in range(W):
@@ -180,16 +201,15 @@ def clear_lines() -> int:
 def spawn_piece():
     global piece, rot, px, py, next_piece
     piece = next_piece
-    next_piece = rnd(7)
+    next_piece = draw_next_from_bag()
     rot = 0
     px = 3
     py = 0
 
 
 def reset_game():
-    global score, lines_cleared, level, drop_counter, paused
-    global prev_score, prev_lines, prev_level
-    global next_piece
+    global score, lines_cleared, level, drop_counter, paused, prev_paused
+    global prev_score, prev_lines, prev_level, next_piece, bag_pos
     for i in range(W * H):
         board[i] = 0
     score = 0
@@ -197,19 +217,19 @@ def reset_game():
     level = 1
     drop_counter = 0
     paused = False
+    prev_paused = False
     prev_score = -1
     prev_lines = -1
     prev_level = -1
-    next_piece = rnd(7)
+    bag_pos = 7
+    next_piece = draw_next_from_bag()
     spawn_piece()
 
 
 def commit_high_score(final_score: int):
-    # Insert in sorted (descending) order into top_scores[0..4].
     inserted: bool = False
     for i in range(5):
         if not inserted and final_score > top_scores[i]:
-            # Shift lower scores down one.
             j: int = 4
             while j > i:
                 top_scores[j] = top_scores[j - 1]
@@ -220,7 +240,7 @@ def commit_high_score(final_score: int):
 
 
 # ================================================================
-# Drawing
+# Drawing helpers
 # ================================================================
 
 def draw_cell(gx: int, gy: int, color: int):
@@ -249,7 +269,6 @@ def draw_board():
 
 
 def draw_frame():
-    # Thin border around the well.
     x1: int = BOARD_X - 1
     y1: int = BOARD_Y - 1
     x2: int = BOARD_X + W * CELL
@@ -268,34 +287,54 @@ def draw_panel_labels():
     screen.print_at(PANEL_X, 178, "P=PAUSE", color=2)
 
 
+# Score / lines / level are right-aligned under their labels so digits don't
+# jitter when they gain a digit. Right edge ends at the end of "LINES" etc.
+PANEL_RIGHT: int = PANEL_X + 6 * 8   # "SCORE" is 5 chars but pad to 6.
+
+
 def refresh_panel():
     global prev_score, prev_lines, prev_level
     if score != prev_score:
-        screen.print_at(PANEL_X, 28, int_to_str(score, 6), color=2)
+        screen.clear_rect(PANEL_X, 28, 7 * 8, 8)
+        screen.print_right(PANEL_RIGHT, 28, int_to_str(score, 6), color=2)
         prev_score = score
     if lines_cleared != prev_lines:
-        screen.print_at(PANEL_X, 60, int_to_str(lines_cleared, 3), color=2)
+        screen.clear_rect(PANEL_X, 60, 7 * 8, 8)
+        screen.print_right(PANEL_RIGHT, 60, int_to_str(lines_cleared, 3), color=2)
         prev_lines = lines_cleared
     if level != prev_level:
-        screen.print_at(PANEL_X, 92, int_to_str(level, 2), color=2)
+        screen.clear_rect(PANEL_X, 92, 7 * 8, 8)
+        screen.print_right(PANEL_RIGHT, 92, int_to_str(level, 2), color=2)
         prev_level = level
 
 
+NEXT_X: int = PANEL_X
+NEXT_Y: int = 134
+NEXT_BOX_W: int = 5 * CELL
+NEXT_BOX_H: int = 4 * CELL
+
+
 def draw_next_preview():
-    # Clear the preview box area (5 cells wide × 4 tall).
-    for cy in range(4):
-        for cx in range(5):
-            sx: int = PANEL_X + cx * CELL
-            sy: int = 134 + cy * CELL
-            screen.box_filled(sx, sy, sx + CELL - 2, sy + CELL - 2, 0)
-    # Render the next piece at its canonical rotation-0 position.
+    screen.clear_rect(NEXT_X, NEXT_Y, NEXT_BOX_W, NEXT_BOX_H)
     for i in range(4):
         c: int = piece_cell(next_piece, 0, i)
         cx: int = c % 4
         cy: int = c // 4
-        sx: int = PANEL_X + cx * CELL
-        sy: int = 134 + cy * CELL
+        sx: int = NEXT_X + cx * CELL
+        sy: int = NEXT_Y + cy * CELL
         screen.box_filled(sx, sy, sx + CELL - 2, sy + CELL - 2, next_piece + 1)
+
+
+PAUSE_Y: int = 92
+PAUSE_H: int = 10
+
+
+def draw_pause_banner(on: bool):
+    # Pause text is centered across the whole screen. Clear the band either
+    # way so board cells underneath get repainted by the next frame's logic.
+    screen.clear_rect(0, PAUSE_Y, 320, PAUSE_H)
+    if on:
+        screen.print_centered(PAUSE_Y, "PAUSED", color=2)
 
 
 # ================================================================
@@ -303,16 +342,17 @@ def draw_next_preview():
 # ================================================================
 
 def enter_title():
+    enter_title_or_play_restore_bg()
     screen.clear()
-    screen.print_at(108, 30, "AMITETRIS", color=2)
-    screen.print_at(88, 60, "HIGH SCORES", color=1)
+    screen.print_centered(24, "AMITETRIS", color=2)
+    screen.print_centered(54, "HIGH SCORES", color=1)
     for i in range(5):
-        screen.print_at(88, 80 + i * 12,
-                        int_to_str(i + 1, 1),
-                        int_to_str(top_scores[i], 6),
-                        color=2)
-    screen.print_at(60, 160, "PRESS FIRE TO START", color=1)
-    screen.print_at(100, 176, "ESC TO QUIT", color=2)
+        screen.print_at(88, 74 + i * 12,
+                        int_to_str(i + 1, 1), ".", color=1)
+        screen.print_right(232, 74 + i * 12,
+                           int_to_str(top_scores[i], 6), color=2)
+    screen.print_centered(156, "PRESS FIRE TO START", color=1)
+    screen.print_centered(176, "ESC TO QUIT", color=2)
 
 
 def update_title():
@@ -328,6 +368,7 @@ def update_title():
 # ================================================================
 
 def enter_play():
+    enter_title_or_play_restore_bg()
     reset_game()
     screen.clear()
     draw_frame()
@@ -338,25 +379,51 @@ def enter_play():
 
 def update_play():
     global px, py, rot, drop_counter, scene
-    global score, lines_cleared, level, paused
+    global score, lines_cleared, level, paused, prev_paused
 
     if key.just_pressed(K_P):
         paused = not paused
-        if paused:
-            screen.print_at(136, 100, "PAUSED", color=2)
-        else:
-            # Repaint the board cells that the PAUSED text overdrew.
-            for y in range(10, 14):
-                for x in range(2, 8):
+
+    # On pause transitions, draw or clear the banner; on unpause we
+    # additionally repaint the board cells that were underneath it.
+    if paused != prev_paused:
+        draw_pause_banner(paused)
+        if not paused:
+            for y in range(H):
+                sy_top: int = BOARD_Y + y * CELL
+                if sy_top + CELL <= PAUSE_Y or sy_top >= PAUSE_Y + PAUSE_H:
+                    continue
+                for x in range(W):
                     c: int = board[y * W + x]
-                    if c > 0:
-                        draw_cell(x, y, c)
-                    else:
-                        draw_cell(x, y, 0)
+                    draw_cell(x, y, c)
+        prev_paused = paused
+
     if paused:
         return
 
     if key.just_pressed(K_ESC):
+        scene = SCENE_GAMEOVER
+        return
+
+    # Belt-and-braces game-over checks:
+    #
+    #   1. The current piece is somehow already colliding. Shouldn't happen
+    #      under normal flow, but if it does we're stuck — end the game.
+    #   2. NO piece of any type can spawn at the default position (3, 0)
+    #      without colliding. The board is truly full at the top.
+    #
+    # Both checks are evaluated every frame so the game can never "not end."
+    if piece_collides(piece, rot, px, py):
+        scene = SCENE_GAMEOVER
+        return
+
+    any_fits: bool = False
+    probe_p: int = 0
+    for probe_p in range(7):
+        if not any_fits:
+            if not piece_collides(probe_p, 0, 3, 0):
+                any_fits = True
+    if not any_fits:
         scene = SCENE_GAMEOVER
         return
 
@@ -378,9 +445,8 @@ def update_play():
     if joy.button_pressed(0):
         while not piece_collides(piece, rot, px, py + 1):
             py = py + 1
-        drop_counter = 999  # force lock this frame
+        drop_counter = 999
 
-    # Gravity
     fall_rate: int = 30 - level * 2
     if fall_rate < 4:
         fall_rate = 4
@@ -393,9 +459,6 @@ def update_play():
         drop_counter = 0
         if piece_collides(piece, rot, px, py + 1):
             lock_piece()
-            # Repaint the cells we just locked — the erase at the top of
-            # this function cleared them and lock_piece() only updates
-            # board[]. Without this the locked blocks stay invisible.
             draw_piece(piece, rot, px, py, piece + 1)
             locked = True
         else:
@@ -414,7 +477,6 @@ def update_play():
                 score = score + 800 * level
             lines_cleared = lines_cleared + n
             level = 1 + lines_cleared // 10
-            # Redraw whole board after lines shifted.
             draw_board()
 
         spawn_piece()
@@ -424,7 +486,6 @@ def update_play():
             scene = SCENE_GAMEOVER
             return
 
-    # Draw the current piece at its new position.
     draw_piece(piece, rot, px, py, piece + 1)
     refresh_panel()
 
@@ -441,12 +502,20 @@ def enter_gameover():
     if not gameover_entered:
         commit_high_score(score)
         gameover_entered = True
+    # Dark red background so the scene transition is visually obvious even
+    # if individual glyph cells fail to paint on some hardware.
+    palette.aga(0, 80, 0, 0)
     screen.clear()
-    screen.print_at(108, 50, "GAME OVER", color=5)
-    screen.print_at(96, 80, "FINAL", int_to_str(score, 6), color=2)
-    screen.print_at(80, 100, "LINES", int_to_str(lines_cleared, 3), color=1)
-    screen.print_at(80, 120, "LEVEL", int_to_str(level, 2), color=1)
-    screen.print_at(68, 160, "PRESS FIRE TO CONTINUE", color=2)
+    screen.print_centered(48, "GAME OVER", color=5)
+    screen.print_centered(80, "FINAL", int_to_str(score, 6), color=2)
+    screen.print_centered(100, "LINES", int_to_str(lines_cleared, 3), color=1)
+    screen.print_centered(120, "LEVEL", int_to_str(level, 2), color=1)
+    screen.print_centered(156, "PRESS FIRE TO CONTINUE", color=2)
+
+
+def enter_title_or_play_restore_bg():
+    # Title/play use the dark-blue background; reset after a game-over cycle.
+    palette.aga(0, 10, 10, 30)
 
 
 def update_gameover():
@@ -457,7 +526,7 @@ def update_gameover():
 
 
 # ================================================================
-# Main loop — single run() with a scene dispatcher
+# Main loop — single run() with a scene dispatcher.
 # ================================================================
 
 def update():
@@ -479,6 +548,6 @@ def update():
         update_gameover()
 
 
-next_piece = rnd(7)
+next_piece = draw_next_from_bag()
 spawn_piece()
 run(update, until=lambda: quit_flag)

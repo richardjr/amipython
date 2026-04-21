@@ -316,6 +316,21 @@ void amipython_bitmap_clear(AmipyBitmap *bm) {
     }
 }
 
+void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    LONG bw, bh, x2, y2;
+    if (!bm->pBitmap || w <= 0 || h <= 0) return;
+    bw = (LONG)bm->width; bh = (LONG)bm->height;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    x2 = x + w; y2 = y + h;
+    if (x2 > bw) w = bw - x;
+    if (y2 > bh) h = bh - y;
+    if (w <= 0 || h <= 0) return;
+    _dirtyExpand(bm, (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1));
+    blitWait();
+    blitRect(bm->pBitmap, (UWORD)x, (UWORD)y, (UWORD)w, (UWORD)h, 0);
+}
+
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     if (bm->pBitmap && x >= 0 && x < (LONG)bm->width
         && y >= 0 && y < (LONG)bm->height) {
@@ -876,12 +891,96 @@ void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color
     va_end(ap);
 }
 
+#define AMIPY_PRINT_MAX_PIECES 16
+
+static LONG _pieces_total_width(const char **strs, LONG n) {
+    LONG total = 0;
+    LONG i;
+    const char *p;
+    for (i = 0; i < n; i++) {
+        const char *s = strs[i] ? strs[i] : "";
+        LONG len = 0;
+        for (p = s; *p; p++) len++;
+        total += len * 8;
+        if (i + 1 < n) total += 8;
+    }
+    return total;
+}
+
+static void _pieces_draw(AmipyBitmap *bm, LONG x, LONG y, LONG color,
+                          const char **strs, LONG n) {
+    LONG cx = x;
+    LONG i;
+    const char *p;
+    for (i = 0; i < n; i++) {
+        const char *s = strs[i] ? strs[i] : "";
+        LONG len = 0;
+        amipython_bitmap_print_at(bm, cx, y, s, color);
+        for (p = s; *p; p++) len++;
+        cx += len * 8;
+        if (i + 1 < n) cx += 8;
+    }
+}
+
+void amipython_bitmap_print_centered(AmipyBitmap *bm, LONG y, const char *text, LONG color) {
+    const char *strs[1];
+    strs[0] = text;
+    {
+        LONG w = _pieces_total_width(strs, 1);
+        LONG x = ((LONG)bm->width - w) / 2;
+        _pieces_draw(bm, x, y, color, strs, 1);
+    }
+}
+
+void amipython_bitmap_print_centered_multi(AmipyBitmap *bm, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    const char *strs[AMIPY_PRINT_MAX_PIECES];
+    LONG i, w, x;
+    if (n > AMIPY_PRINT_MAX_PIECES) n = AMIPY_PRINT_MAX_PIECES;
+    va_start(ap, n);
+    for (i = 0; i < n; i++) strs[i] = va_arg(ap, const char *);
+    va_end(ap);
+    w = _pieces_total_width(strs, n);
+    x = ((LONG)bm->width - w) / 2;
+    _pieces_draw(bm, x, y, color, strs, n);
+}
+
+void amipython_bitmap_print_right(AmipyBitmap *bm, LONG x_right, LONG y, const char *text, LONG color) {
+    const char *strs[1];
+    strs[0] = text;
+    {
+        LONG w = _pieces_total_width(strs, 1);
+        _pieces_draw(bm, x_right - w, y, color, strs, 1);
+    }
+}
+
+void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    const char *strs[AMIPY_PRINT_MAX_PIECES];
+    LONG i, w;
+    if (n > AMIPY_PRINT_MAX_PIECES) n = AMIPY_PRINT_MAX_PIECES;
+    va_start(ap, n);
+    for (i = 0; i < n; i++) strs[i] = va_arg(ap, const char *);
+    va_end(ap);
+    w = _pieces_total_width(strs, n);
+    _pieces_draw(bm, x_right - w, y, color, strs, n);
+}
+
 LONG amipython_rnd(LONG n) {
     /* Simple LCG — adequate for games */
     static unsigned long s_seed = 12345;
     if (n <= 0) return 0;
     s_seed = s_seed * 1103515245UL + 12345;
     return (LONG)((s_seed >> 16) % (unsigned long)n);
+}
+
+void amipython_shuffle(LONG *items, LONG count) {
+    LONG i, j;
+    LONG tmp;
+    for (i = count - 1; i > 0; i--) {
+        j = amipython_rnd(i + 1);
+        tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+    }
 }
 
 static float _sin_approx(float x) {
@@ -1662,6 +1761,19 @@ void amipython_bitmap_clear(AmipyBitmap *bm) {
     amipython_print_str("\n");
 }
 
+void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
+    amipython_print_str("[bitmap] clear_rect ");
+    amipython_print_long(x);
+    amipython_print_str(",");
+    amipython_print_long(y);
+    amipython_print_str(" ");
+    amipython_print_long(w);
+    amipython_print_str("x");
+    amipython_print_long(h);
+    amipython_print_str("\n");
+    (void)bm;
+}
+
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     amipython_print_str("[bitmap] plot ");
     amipython_print_long(x);
@@ -1802,6 +1914,15 @@ LONG amipython_rnd(LONG n) {
     return (LONG)((s_seed >> 16) % (unsigned long)n);
 }
 
+void amipython_shuffle(LONG *items, LONG count) {
+    LONG i, j;
+    LONG tmp;
+    for (i = count - 1; i > 0; i--) {
+        j = amipython_rnd(i + 1);
+        tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+    }
+}
+
 void amipython_mouse_set_pointer(AmipySprite *sprite) {
     amipython_print_str("[input] mouse_set_pointer\n");
     (void)sprite;
@@ -1858,6 +1979,49 @@ void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color
     amipython_print_str("\n");
     va_end(ap);
     (void)bm; (void)x; (void)y; (void)color;
+}
+
+void amipython_bitmap_print_centered(AmipyBitmap *bm, LONG y, const char *text, LONG color) {
+    amipython_print_str("[bitmap] print_centered ");
+    amipython_print_str(text);
+    amipython_print_str("\n");
+    (void)bm; (void)y; (void)color;
+}
+void amipython_bitmap_print_centered_multi(AmipyBitmap *bm, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    LONG i;
+    va_start(ap, n);
+    amipython_print_str("[bitmap] print_centered_multi ");
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *);
+        if (!s) s = "";
+        if (i > 0) amipython_print_str(" ");
+        amipython_print_str(s);
+    }
+    amipython_print_str("\n");
+    va_end(ap);
+    (void)bm; (void)y; (void)color;
+}
+void amipython_bitmap_print_right(AmipyBitmap *bm, LONG x_right, LONG y, const char *text, LONG color) {
+    amipython_print_str("[bitmap] print_right ");
+    amipython_print_str(text);
+    amipython_print_str("\n");
+    (void)bm; (void)x_right; (void)y; (void)color;
+}
+void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, LONG color, LONG n, ...) {
+    va_list ap;
+    LONG i;
+    va_start(ap, n);
+    amipython_print_str("[bitmap] print_right_multi ");
+    for (i = 0; i < n; i++) {
+        const char *s = va_arg(ap, const char *);
+        if (!s) s = "";
+        if (i > 0) amipython_print_str(" ");
+        amipython_print_str(s);
+    }
+    amipython_print_str("\n");
+    va_end(ap);
+    (void)bm; (void)x_right; (void)y; (void)color;
 }
 
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {

@@ -147,6 +147,17 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 params=[],
                 return_type=AmipyType.VOID,
             ),
+            "clear_rect": EngineMethod(
+                name="clear_rect",
+                c_name="amipython_bitmap_clear_rect",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("w", AmipyType.INT),
+                    EngineParam("h", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
             "plot": EngineMethod(
                 name="plot",
                 c_name="amipython_bitmap_plot",
@@ -174,6 +185,27 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 c_name="amipython_bitmap_print_at",
                 params=[
                     EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("text", AmipyType.STR),
+                ],
+                return_type=AmipyType.VOID,
+                keywords={"color": (AmipyType.INT, 1)},
+            ),
+            "print_centered": EngineMethod(
+                name="print_centered",
+                c_name="amipython_bitmap_print_centered",
+                params=[
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("text", AmipyType.STR),
+                ],
+                return_type=AmipyType.VOID,
+                keywords={"color": (AmipyType.INT, 1)},
+            ),
+            "print_right": EngineMethod(
+                name="print_right",
+                c_name="amipython_bitmap_print_right",
+                params=[
+                    EngineParam("x_right", AmipyType.INT),
                     EngineParam("y", AmipyType.INT),
                     EngineParam("text", AmipyType.STR),
                 ],
@@ -662,6 +694,12 @@ BUILTINS: dict[str, EngineBuiltin] = {
         c_name="amipython_rnd",
         params=[EngineParam("n", AmipyType.INT)],
         return_type=AmipyType.INT,
+    ),
+    "shuffle": EngineBuiltin(
+        python_name="shuffle",
+        c_name="amipython_shuffle",
+        params=[EngineParam("lst", AmipyType.LIST)],
+        return_type=AmipyType.VOID,
     ),
     "int_to_str": EngineBuiltin(
         python_name="int_to_str",
