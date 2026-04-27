@@ -20,7 +20,8 @@ Stage-2 features used:
     bm.clear_rect        — region redraws (panel values, pause banner, next preview)
 """
 
-from amiga import Display, Bitmap, palette, run
+from dataclasses import dataclass
+from amiga import Display, Bitmap, palette, run, rnd
 from amiga import joy, key, int_to_str, shuffle, storage
 from amiga import K_P, K_ESC
 
@@ -133,6 +134,50 @@ display.show(screen)
 
 
 # ================================================================
+# Starfield — top-down drifting stars in the left margin only.
+# x < STAR_BAND_X is a clean band in both scenes (well starts at BOARD_X=120;
+# title text only reaches down to x=84 in the worst case), so animated stars
+# never collide with UI and we can simply plot 0 to erase. Speeds 1..3, with
+# the fastest stars rendered in bright yellow for parallax depth.
+# ================================================================
+
+STAR_BAND_X: int = 80
+NUM_STARS: int = 50
+
+
+@dataclass
+class Star:
+    x: int
+    y: int
+    speed: int
+    color: int
+
+
+stars: list[Star] = []
+for i in range(NUM_STARS):
+    spd: int = 1 + rnd(3)
+    col: int = 1
+    if spd >= 3:
+        col = 2
+    stars.append(Star(
+        x=rnd(STAR_BAND_X),
+        y=rnd(200),
+        speed=spd,
+        color=col,
+    ))
+
+
+def animate_stars():
+    for star in stars:
+        screen.plot(star.x, star.y, 0)
+        new_y: int = star.y + star.speed
+        if new_y >= 200:
+            new_y = new_y - 200
+        star.y = new_y
+        screen.plot(star.x, new_y, star.color)
+
+
+# ================================================================
 # 7-bag randomiser
 # ================================================================
 
@@ -236,7 +281,7 @@ def commit_high_score(final_score: int):
                 j = j - 1
             top_scores[i] = final_score
             inserted = True
-    storage.save_int_list("scores", top_scores)
+    # storage.save_int_list("scores", top_scores)  # disabled — diagnosing write-protected disk hang
 
 
 # ================================================================
@@ -331,7 +376,9 @@ PAUSE_H: int = 10
 
 def draw_pause_banner(on: bool):
     # Pause text is centered across the whole screen. Clear the band either
-    # way so board cells underneath get repainted by the next frame's logic.
+    # way; board cells in that band are repainted by the next frame's logic
+    # and animated stars in the left margin re-emerge as their drift advances
+    # past the band (no instant redraw — the dark band reads as "paused").
     screen.clear_rect(0, PAUSE_Y, 320, PAUSE_H)
     if on:
         screen.print_centered(PAUSE_Y, "PAUSED", color=2)
@@ -357,6 +404,7 @@ def enter_title():
 
 def update_title():
     global scene, quit_flag
+    animate_stars()
     if joy.button_pressed(0):
         scene = SCENE_PLAY
     if key.just_pressed(K_ESC):
@@ -400,6 +448,10 @@ def update_play():
 
     if paused:
         return
+
+    # Drift the starfield every active frame (skipped when paused so the
+    # field freezes with the gameplay).
+    animate_stars()
 
     if key.just_pressed(K_ESC):
         scene = SCENE_GAMEOVER

@@ -158,6 +158,18 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "copy_from": EngineMethod(
+                name="copy_from",
+                c_name="amipython_bitmap_copy_from",
+                params=[
+                    EngineParam("src", AmipyType.BITMAP),
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                    EngineParam("w", AmipyType.INT),
+                    EngineParam("h", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
             "plot": EngineMethod(
                 name="plot",
                 c_name="amipython_bitmap_plot",

@@ -53,6 +53,12 @@ void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h
     (void)bm;
 }
 
+void amipython_bitmap_copy_from(AmipyBitmap *dst, AmipyBitmap *src,
+                                LONG x, LONG y, LONG w, LONG h) {
+    printf("[bitmap] copy_from %ld,%ld %ldx%ld\n", x, y, w, h);
+    (void)dst; (void)src;
+}
+
 void amipython_bitmap_clear(AmipyBitmap *bm) {
     printf("[bitmap] clear %ux%u\n", bm->width, bm->height);
 }

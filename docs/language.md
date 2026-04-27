@@ -242,6 +242,12 @@ bm.plot(x, y, color)                    # single pixel
 bm.line(x1, y1, x2, y2, color)          # single-pixel line
 bm.clear()                              # fill entire bitmap with colour 0
 bm.clear_rect(x, y, w, h)               # fill one region with colour 0
+bm.copy_from(src, x, y, w, h)           # copy a rect from src bitmap
+                                        #   (= "erase to backdrop" — paint a
+                                        #   region with whatever's on `src` at
+                                        #   the same coordinates; cheap blit on
+                                        #   Amiga, used for static-backdrop
+                                        #   layering without dual playfield)
 ```
 
 ### Text Rendering

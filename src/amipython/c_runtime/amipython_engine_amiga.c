@@ -331,6 +331,27 @@ void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h
     blitRect(bm->pBitmap, (UWORD)x, (UWORD)y, (UWORD)w, (UWORD)h, 0);
 }
 
+void amipython_bitmap_copy_from(AmipyBitmap *dst, AmipyBitmap *src,
+                                LONG x, LONG y, LONG w, LONG h) {
+    LONG bw, bh, x2, y2;
+    if (!dst || !src || !dst->pBitmap || !src->pBitmap) return;
+    if (w <= 0 || h <= 0) return;
+    bw = (LONG)dst->width; bh = (LONG)dst->height;
+    if ((LONG)src->width < bw) bw = (LONG)src->width;
+    if ((LONG)src->height < bh) bh = (LONG)src->height;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    x2 = x + w; y2 = y + h;
+    if (x2 > bw) w = bw - x;
+    if (y2 > bh) h = bh - y;
+    if (w <= 0 || h <= 0) return;
+    _dirtyExpand(dst, (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1));
+    blitWait();
+    blitCopy(src->pBitmap, (UWORD)x, (UWORD)y,
+             dst->pBitmap, (UWORD)x, (UWORD)y,
+             (UWORD)w, (UWORD)h, MINTERM_COOKIE);
+}
+
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     if (bm->pBitmap && x >= 0 && x < (LONG)bm->width
         && y >= 0 && y < (LONG)bm->height) {
@@ -1253,6 +1274,23 @@ void amipython_sfx_stop(LONG slot) {
  *   For str:      bytes 6-7 = length (BE16), followed by length bytes.
  */
 #include <proto/dos.h>
+#include <proto/exec.h>
+#include <dos/dosextens.h>
+
+/* Suppress DOS system requesters (e.g. "Volume X is write protected") around
+ * file I/O so failures return cleanly instead of popping a modal dialog over
+ * the running game. The original pr_WindowPtr is restored afterwards. */
+static APTR _silence_dos_requesters(void) {
+    struct Process *pr = (struct Process *)FindTask(NULL);
+    APTR old = pr->pr_WindowPtr;
+    pr->pr_WindowPtr = (APTR)-1L;
+    return old;
+}
+
+static void _restore_dos_requesters(APTR old) {
+    struct Process *pr = (struct Process *)FindTask(NULL);
+    pr->pr_WindowPtr = old;
+}
 
 static void _store_path(const char *name, char *out, LONG out_len) {
     const char *prefix = "PROGDIR:";
@@ -1278,8 +1316,11 @@ static ULONG _rd_be32(const UBYTE *p) {
 BOOL amipython_storage_exists(const char *name) {
     char path[64];
     BPTR f;
+    APTR old;
     _store_path(name, path, sizeof(path));
+    old = _silence_dos_requesters();
     f = Open(path, MODE_OLDFILE);
+    _restore_dos_requesters(old);
     if (!f) return FALSE;
     Close(f);
     return TRUE;
@@ -1291,9 +1332,14 @@ void amipython_storage_save_int_list(const char *name, const LONG *items, LONG c
     UBYTE buf[4];
     BPTR f;
     LONG i;
+    APTR old;
     _store_path(name, path, sizeof(path));
+    old = _silence_dos_requesters();
     f = Open(path, MODE_NEWFILE);
-    if (!f) return;
+    if (!f) {
+        _restore_dos_requesters(old);
+        return;
+    }
     header[0]='A'; header[1]='M'; header[2]='P'; header[3]='Y';
     header[4] = 1; header[5] = 0;
     _be32(&header[6], (ULONG)count);
@@ -1303,6 +1349,7 @@ void amipython_storage_save_int_list(const char *name, const LONG *items, LONG c
         Write(f, (APTR)buf, 4);
     }
     Close(f);
+    _restore_dos_requesters(old);
 }
 
 BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_out, LONG capacity) {
@@ -1311,12 +1358,14 @@ BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_
     UBYTE buf[4];
     BPTR f;
     LONG i, count;
+    APTR old;
     _store_path(name, path, sizeof(path));
+    old = _silence_dos_requesters();
     f = Open(path, MODE_OLDFILE);
-    if (!f) return FALSE;
+    if (!f) { _restore_dos_requesters(old); return FALSE; }
     if (Read(f, header, 10) != 10 ||
         header[0]!='A' || header[1]!='M' || header[2]!='P' || header[3]!='Y' ||
-        header[5] != 0) { Close(f); return FALSE; }
+        header[5] != 0) { Close(f); _restore_dos_requesters(old); return FALSE; }
     count = (LONG)_rd_be32(&header[6]);
     if (count > capacity) count = capacity;
     for (i = 0; i < count; i++) {
@@ -1325,6 +1374,7 @@ BOOL amipython_storage_load_int_list(const char *name, LONG *items, LONG *count_
     }
     *count_out = i;
     Close(f);
+    _restore_dos_requesters(old);
     return TRUE;
 }
 
@@ -1337,11 +1387,13 @@ void amipython_storage_save_str(const char *name, const char *value) {
     LONG len = 0;
     const char *p;
     BPTR f;
+    APTR old;
     _store_path(name, path, sizeof(path));
     for (p = value; *p; p++) len++;
     if (len > 0xFFFF) len = 0xFFFF;
+    old = _silence_dos_requesters();
     f = Open(path, MODE_NEWFILE);
-    if (!f) return;
+    if (!f) { _restore_dos_requesters(old); return; }
     header[0]='A'; header[1]='M'; header[2]='P'; header[3]='Y';
     header[4] = 1; header[5] = 1;
     header[6] = (UBYTE)((len >> 8) & 0xFF);
@@ -1349,6 +1401,7 @@ void amipython_storage_save_str(const char *name, const char *value) {
     Write(f, (APTR)header, 8);
     if (len > 0) Write(f, (APTR)value, len);
     Close(f);
+    _restore_dos_requesters(old);
 }
 
 const char *amipython_storage_load_str(const char *name) {
@@ -1356,19 +1409,22 @@ const char *amipython_storage_load_str(const char *name) {
     UBYTE header[8];
     LONG len, rd;
     BPTR f;
+    APTR old;
     _store_path(name, path, sizeof(path));
     s_loaded_str[0] = 0;
+    old = _silence_dos_requesters();
     f = Open(path, MODE_OLDFILE);
-    if (!f) return s_loaded_str;
+    if (!f) { _restore_dos_requesters(old); return s_loaded_str; }
     if (Read(f, header, 8) != 8 ||
         header[0]!='A' || header[1]!='M' || header[2]!='P' || header[3]!='Y' ||
-        header[5] != 1) { Close(f); return s_loaded_str; }
+        header[5] != 1) { Close(f); _restore_dos_requesters(old); return s_loaded_str; }
     len = ((LONG)header[6] << 8) | (LONG)header[7];
     if (len >= AMIPYTHON_STR_LOAD_MAX) len = AMIPYTHON_STR_LOAD_MAX - 1;
     rd = Read(f, s_loaded_str, len);
     if (rd < 0) rd = 0;
     s_loaded_str[rd] = 0;
     Close(f);
+    _restore_dos_requesters(old);
     return s_loaded_str;
 }
 
@@ -1772,6 +1828,20 @@ void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h
     amipython_print_long(h);
     amipython_print_str("\n");
     (void)bm;
+}
+
+void amipython_bitmap_copy_from(AmipyBitmap *dst, AmipyBitmap *src,
+                                LONG x, LONG y, LONG w, LONG h) {
+    amipython_print_str("[bitmap] copy_from ");
+    amipython_print_long(x);
+    amipython_print_str(",");
+    amipython_print_long(y);
+    amipython_print_str(" ");
+    amipython_print_long(w);
+    amipython_print_str("x");
+    amipython_print_long(h);
+    amipython_print_str("\n");
+    (void)dst; (void)src;
 }
 
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {

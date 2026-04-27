@@ -2,6 +2,27 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2026-04-27: TODO — `storage.save_*` freezes on write-protected disk under Amiberry
+
+**Status:** Open. Workaround in place (save call commented out in `examples/amitetris/amitetris.py`).
+
+**Symptom:** When the bootable ADF is write-protected (the normal state for a real Amiga floppy and the default for Amiberry), reaching `storage.save_int_list("scores", ...)` at game-over freezes the game. Removing the save call eliminates the hang. Load on startup is unaffected.
+
+**Suspected cause:** `Open(path, MODE_NEWFILE)` against `PROGDIR:` on a write-protected volume triggers DOS's "Volume X is write protected" system requester, which has no window to attach to (ACE has taken over the display) and blocks the calling task indefinitely.
+
+**Attempted fix that did NOT work:** Setting `pr_WindowPtr = (APTR)-1L` on the current `struct Process` for the duration of the file I/O — the standard Amiga technique for suppressing system requesters. Wrapped all five `amipython_storage_*` functions (`amipython_engine_amiga.c`). Game still freezes. So either the requester isn't the actual cause, or `pr_WindowPtr` suppression doesn't apply to this code path under Amiberry.
+
+**Next things to try:**
+- Confirm what's actually blocking — add a `kPrintF` / log trace immediately before and after `Open(MODE_NEWFILE)` to see whether `Open()` itself blocks or returns and we hang later.
+- Check the disk's write-protect state up front via `Lock()` + `Info()` (`id_DiskState == ID_WRITE_PROTECTED`) and short-circuit before calling `Open()`.
+- Try `pr_WindowPtr = NULL` instead of `-1` (some sources disagree on which value suppresses requesters vs. defaulting to the WB screen).
+- Check whether ACE's `systemUnuse()` leaves DOS in a state where it can't service file I/O at all on this filesystem layer — if so, the storage API simply can't work mid-game and we'd need to defer writes to engine-shutdown time, or copy the save file off `PROGDIR:` (e.g. to `RAM:`) and let a wrapper script copy it back when the game exits.
+- Investigate whether Amiberry-specific ADF mounting differs from a real OFS/FFS write-protected floppy in how it surfaces the error.
+
+**Files involved:** `src/amipython/c_runtime/amipython_engine_amiga.c` (storage section), `examples/amitetris/amitetris.py` (currently has save commented out).
+
+---
+
 ## 2025-03-08: ProTracker MOD playback via ptplayer
 
 **Feature:** `music.load()` / `music.play()` / `music.stop()` / `music.volume()` — background music playback.

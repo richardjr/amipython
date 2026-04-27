@@ -5,6 +5,10 @@
 # horizontally at a constant speed, while the background stays fixed.
 # The foreground bitmap is twice the display width, with the right half
 # being a copy of the left half for seamless wrapping.
+#
+# NOTE: aspirational — `DualPlayfield` is not yet implemented. ACE doesn't
+# expose hardware dual-playfield mode and the manager has been deferred to a
+# future engine project; see project-vault ADR 0002 (hardware-dual-playfield).
 
 from amiga import DualPlayfield, Bitmap, joy, rnd, wrap, run
 

@@ -642,6 +642,21 @@ wait_mouse()
 ''')
         assert "[bitmap] clear_rect 10,20 30x40" in output
 
+    def test_copy_from(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, wait_mouse
+display = Display(320, 200, bitplanes=3)
+bg = Bitmap(320, 200, bitplanes=3)
+fg = Bitmap(320, 200, bitplanes=3)
+bg.plot(50, 50, 1)
+fg.copy_from(bg, 0, 0, 320, 200)
+fg.copy_from(bg, 100, 100, 16, 16)
+display.show(fg)
+wait_mouse()
+''')
+        assert "[bitmap] copy_from 0,0 320x200" in output
+        assert "[bitmap] copy_from 100,100 16x16" in output
+
     def test_print_at_multi_arg(self):
         output = _compile_and_run('''
 from amiga import Display, Bitmap, wait_mouse

@@ -4,6 +4,12 @@
 # Two independent layers (foreground and background) scroll in opposite
 # sinusoidal patterns, creating a parallax effect. The foreground has
 # random lines, the background has random circles.
+#
+# NOTE: aspirational — `DualPlayfield` is not yet implemented. ACE doesn't
+# expose hardware dual-playfield mode and the manager has been deferred to a
+# future engine project; see project-vault ADR 0002 (hardware-dual-playfield).
+# For static backdrops (e.g. starfield behind a play area) use
+# `Bitmap.copy_from(src, x, y, w, h)` — see `examples/amitetris/`.
 
 from amiga import DualPlayfield, Bitmap, joy, sin, cos, rnd, run
 

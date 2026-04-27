@@ -460,6 +460,26 @@ def test_bitmap_clear_rect():
     bm.clear_rect(0, 0, 0, 0)
 
 
+def test_bitmap_copy_from():
+    from amiga import Bitmap, palette
+    palette.set(0, 0, 0, 0)
+    palette.set(3, 0, 15, 0)  # green — backdrop colour
+    palette.set(5, 15, 0, 0)  # red — foreground colour
+    bg = Bitmap(64, 32, bitplanes=3)
+    fg = Bitmap(64, 32, bitplanes=3)
+    bg.box_filled(0, 0, 63, 31, 3)        # green backdrop
+    fg.box_filled(0, 0, 63, 31, 5)        # red foreground
+    fg.copy_from(bg, 10, 10, 20, 20)      # punch a window through to the green
+    inside = fg._surface.get_at((15, 15))[:3]
+    outside = fg._surface.get_at((40, 5))[:3]
+    assert inside[1] > 0 and inside[0] == 0   # green only
+    assert outside[0] > 0 and outside[1] == 0 # red only
+    # Clamping / no-op cases.
+    fg.copy_from(bg, -50, -50, 10, 10)
+    fg.copy_from(bg, 1000, 1000, 10, 10)
+    fg.copy_from(bg, 0, 0, 0, 0)
+
+
 def test_bitmap_print_at_multi_arg():
     from amiga import Bitmap
     bm = Bitmap(320, 200, bitplanes=3)

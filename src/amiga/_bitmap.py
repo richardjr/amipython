@@ -63,6 +63,20 @@ class Bitmap:
         if rect.w > 0 and rect.h > 0:
             self._surface.fill(0, rect)
 
+    def copy_from(self, src: "Bitmap", x: int, y: int, w: int, h: int) -> None:
+        """Copy a rectangular region from another bitmap into this bitmap at the
+        same coordinates. Used to "erase to backdrop" — fill an area with what's
+        on the source bitmap (typically a starfield or background image) so that
+        sprites/UI drawn on top can be cleanly removed without scorching the
+        backdrop. Mirrors `amipython_bitmap_copy_from` in the C runtime."""
+        if w <= 0 or h <= 0:
+            return
+        rect = pygame.Rect(x, y, w, h).clip(self._surface.get_rect())
+        rect = rect.clip(src._surface.get_rect())
+        if rect.w > 0 and rect.h > 0:
+            self._surface.blit(src._surface, (rect.x, rect.y),
+                               area=(rect.x, rect.y, rect.w, rect.h))
+
     def _render_pieces(self, cx: int, y: int, pieces, color: int) -> None:
         """Internal: render a sequence of text pieces at the given cursor x."""
         for i, piece in enumerate(pieces):

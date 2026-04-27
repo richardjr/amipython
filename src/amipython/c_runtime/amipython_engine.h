@@ -132,6 +132,7 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
 void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
 void amipython_bitmap_clear(AmipyBitmap *bm);
 void amipython_bitmap_clear_rect(AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
+void amipython_bitmap_copy_from(AmipyBitmap *dst, AmipyBitmap *src, LONG x, LONG y, LONG w, LONG h);
 void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color);
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
 void amipython_shape_load(AmipyShape *shape, const char *path);
