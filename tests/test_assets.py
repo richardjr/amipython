@@ -11,6 +11,7 @@ from amipython.assets import (
     AssetInfo,
     collect_asset_paths,
     convert_image,
+    convert_image_to_bytes,
     _chunky_to_planar,
     _generate_mask,
 )
@@ -87,6 +88,21 @@ class TestConvertImage:
             assert w == 16
             assert h == 16
             assert depth == info.depth
+
+    def test_convert_image_to_bytes_unaligned_width(self):
+        """Regression: a 60-wide PNG (the amifish logo) used to crash
+        because convert_image_to_bytes passed already-aligned width back
+        into _chunky_to_planar, which re-aligned and then read past the
+        source row."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            png_path = _make_indexed_png(tmppath / "logo.png", 60, 16, colors=4, fill=1)
+            info = convert_image_to_bytes(str(png_path))
+            assert info is not None
+            assert info["width"] == 64    # aligned up from 60
+            assert info["height"] == 16
+            # 64 px wide × 16 rows × 2 planes (4 colours -> depth 2) = 256 bytes
+            assert len(info["data"]) == (64 // 8) * 16 * info["depth"]
 
     def test_mask_generated_when_transparent(self):
         with tempfile.TemporaryDirectory() as tmpdir:

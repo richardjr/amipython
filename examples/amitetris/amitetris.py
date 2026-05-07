@@ -22,8 +22,15 @@ Stage-2 features used:
 
 from dataclasses import dataclass
 from amiga import Display, Bitmap, palette, run, rnd
-from amiga import joy, key, int_to_str, shuffle, storage
+from amiga import joy, key, int_to_str, shuffle, storage, music, sfx
 from amiga import K_P, K_ESC
+
+# --- SFX slots ---
+SFX_LOCK: int = 0
+SFX_ROTATE: int = 1
+SFX_CLEAR: int = 2
+SFX_TETRIS: int = 3
+SFX_GAMEOVER: int = 4
 
 # --- Geometry ---
 W: int = 10
@@ -131,6 +138,16 @@ palette.aga(6, 240, 140, 40)   # L
 palette.aga(7, 60, 100, 240)   # J
 
 display.show(screen)
+
+# --- Audio ---
+music.load("data/music.mod")
+sfx.load(SFX_LOCK, "data/lock.wav")
+sfx.load(SFX_ROTATE, "data/rotate.wav")
+sfx.load(SFX_CLEAR, "data/clear.wav")
+sfx.load(SFX_TETRIS, "data/tetris.wav")
+sfx.load(SFX_GAMEOVER, "data/gameover.wav")
+music.play()
+music.volume(24)   # 0..64 — keep music in the background so SFX dominate
 
 
 # ================================================================
@@ -492,6 +509,7 @@ def update_play():
         new_rot: int = (rot + 1) % 4
         if not piece_collides(piece, new_rot, px, py):
             rot = new_rot
+            sfx.play(SFX_ROTATE, volume=40)
 
     # Hard drop
     if joy.button_pressed(0):
@@ -513,6 +531,7 @@ def update_play():
             lock_piece()
             draw_piece(piece, rot, px, py, piece + 1)
             locked = True
+            sfx.play(SFX_LOCK, volume=48)
         else:
             py = py + 1
 
@@ -530,6 +549,10 @@ def update_play():
             lines_cleared = lines_cleared + n
             level = 1 + lines_cleared // 10
             draw_board()
+            if n >= 4:
+                sfx.play(SFX_TETRIS, volume=64)
+            else:
+                sfx.play(SFX_CLEAR, volume=56)
 
         spawn_piece()
         draw_next_preview()
@@ -553,6 +576,7 @@ def enter_gameover():
     global gameover_entered
     if not gameover_entered:
         commit_high_score(score)
+        sfx.play(SFX_GAMEOVER, volume=64)
         gameover_entered = True
     # Dark red background so the scene transition is visually obvious even
     # if individual glyph cells fail to paint on some hardware.

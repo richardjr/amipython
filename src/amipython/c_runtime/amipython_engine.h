@@ -11,12 +11,13 @@
 
 #include "amipython.h"
 
-/* On Amiga, UWORD/UBYTE/ULONG come from exec/types.h (via amipython.h).
+/* On Amiga, UWORD/UBYTE/ULONG/WORD come from exec/types.h (via amipython.h).
    On host, define them. */
 #ifndef AMIGA
 typedef unsigned short UWORD;
 typedef unsigned char UBYTE;
 typedef unsigned long ULONG;
+typedef short WORD;
 #endif
 
 #ifdef ACE_ENGINE
@@ -74,12 +75,15 @@ typedef struct {
 } AmipyShape;
 
 /* Hardware sprite */
+struct tSprite;
 typedef struct {
     UWORD width, height;
     UBYTE bitplanes;
-    struct BitMap *pBitmap;  /* source bitmap data */
-    UBYTE ubChannel;         /* last channel used */
-    UBYTE bCollided;         /* set by collision_check() */
+    struct BitMap *pBitmap;       /* sprite bitmap data (16×(h+2) 2bp interleaved) */
+    UBYTE ubChannel;              /* last channel used (0xFF = unassigned) */
+    UBYTE bCollided;              /* set by collision_check() */
+    WORD lastX, lastY;            /* last show() position (signed; off-screen allowed) */
+    struct tSprite *pAceSprite;   /* ACE sprite handle, NULL until first show() */
 } AmipySprite;
 
 /* Tilemap — tile buffer with hardware scrolling.
@@ -100,6 +104,21 @@ typedef struct {
     UBYTE blockingCount;         /* number of tile types with flag data */
 } AmipyTilemap;
 
+/* Dual playfield — two 3-bitplane bitmaps composited via OCS DPF mode.
+ * Replaces Display + simpleBuffer with a hand-rolled view + custom Copper
+ * block that wires all six BPLxPT registers, BPLCON0 with the DPF bit,
+ * BPLCON1 with both scroll nibbles, and BPL1MOD / BPL2MOD per-playfield. */
+typedef struct {
+    UWORD width, height;          /* visible window */
+    struct tView *pView;
+    struct _tVPort *pVPort;
+    struct BitMap *pFgBitmap;     /* foreground bitmap (bitplanes 1/3/5) */
+    struct BitMap *pBgBitmap;     /* background bitmap (bitplanes 2/4/6) */
+    void *pCopBlock;              /* tCopBlock holding the BPL/BPLCON setup */
+    WORD scrollFgX, scrollFgY;
+    WORD scrollBgX, scrollBgY;
+} AmipyDualPlayfield;
+
 #else
 /* Host / vbcc stubs — simple data-only struct */
 typedef struct {
@@ -111,6 +130,8 @@ typedef struct {
     UWORD width, height;
     UBYTE *data;
     UBYTE bCollided;
+    WORD lastX, lastY;
+    void *pAceSprite;  /* unused on host/vbcc; present so the struct layout matches */
 } AmipySprite;
 
 typedef struct {
@@ -122,6 +143,14 @@ typedef struct {
     const UBYTE *pBlockingFlags;
     UBYTE blockingCount;
 } AmipyTilemap;
+
+typedef struct {
+    UWORD width, height;
+    UBYTE *pFgData;
+    UBYTE *pBgData;
+    WORD scrollFgX, scrollFgY;
+    WORD scrollBgX, scrollBgY;
+} AmipyDualPlayfield;
 #endif
 
 void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp);
@@ -147,12 +176,19 @@ BOOL amipython_joy_button_pressed(LONG port);
 void amipython_wait_mouse(void);
 void amipython_vwait(LONG n);
 LONG amipython_rnd(LONG n);
+LONG amipython_rnd_range(LONG lo, LONG hi);
 LONG amipython_mouse_x(void);
 LONG amipython_mouse_y(void);
 void amipython_mouse_set_pointer(AmipySprite *sprite);
 void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h);
 void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel);
 BOOL amipython_sprite_collided(AmipySprite *sprite);
+BOOL amipython_sprite_overlaps(AmipySprite *sprite, AmipySprite *other);
+void amipython_copper_color_at(LONG scanline, LONG reg, LONG color);
+void amipython_dual_playfield_init(AmipyDualPlayfield *dpf, AmipyBitmap *fg, AmipyBitmap *bg);
+void amipython_dual_playfield_show(AmipyDualPlayfield *dpf);
+void amipython_dual_playfield_scroll_fg(AmipyDualPlayfield *dpf, LONG x, LONG y);
+void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf, LONG x, LONG y);
 void amipython_collision_register(LONG color, LONG mask);
 void amipython_collision_check(void);
 void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);

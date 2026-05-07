@@ -37,11 +37,20 @@ def vwait(n: int = 1) -> None:
         backend.wait_vblank()
 
 
-def rnd(n: int) -> int:
-    """Return a random integer from 0 to n-1."""
-    if n <= 0:
-        return 0
-    return random.randint(0, n - 1)
+def rnd(n: int, hi: int | None = None) -> int:
+    """Return a random integer.
+
+    rnd(n)       -> 0 <= r < n
+    rnd(lo, hi)  -> lo <= r < hi
+    """
+    if hi is None:
+        if n <= 0:
+            return 0
+        return random.randint(0, n - 1)
+    span = hi - n
+    if span <= 0:
+        return n
+    return n + random.randint(0, span - 1)
 
 
 def shuffle(lst) -> None:

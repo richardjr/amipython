@@ -283,6 +283,12 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 params=[],
                 return_type=AmipyType.BOOL,
             ),
+            "overlaps": EngineMethod(
+                name="overlaps",
+                c_name="amipython_sprite_overlaps",
+                params=[EngineParam("other", AmipyType.SPRITE)],
+                return_type=AmipyType.BOOL,
+            ),
         },
         static_methods={
             "grab": EngineStaticMethod(
@@ -296,6 +302,44 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                     EngineParam("h", AmipyType.INT),
                 ],
                 return_type=AmipyType.SPRITE,
+            ),
+        },
+    ),
+    "DualPlayfield": EngineObjectType(
+        python_name="DualPlayfield",
+        c_type="AmipyDualPlayfield",
+        c_init="amipython_dual_playfield_init",
+        constructor=EngineConstructor(
+            positional=[
+                EngineParam("fg", AmipyType.BITMAP),
+                EngineParam("bg", AmipyType.BITMAP),
+            ],
+            keywords={},
+        ),
+        methods={
+            "show": EngineMethod(
+                name="show",
+                c_name="amipython_dual_playfield_show",
+                params=[],
+                return_type=AmipyType.VOID,
+            ),
+            "scroll_fg": EngineMethod(
+                name="scroll_fg",
+                c_name="amipython_dual_playfield_scroll_fg",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
+            "scroll_bg": EngineMethod(
+                name="scroll_bg",
+                c_name="amipython_dual_playfield_scroll_bg",
+                params=[
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
             ),
         },
     ),
@@ -572,6 +616,22 @@ MODULE_TYPES: dict[str, EngineModuleType] = {
             ),
         },
     ),
+    "copper": EngineModuleType(
+        python_name="copper",
+        functions={
+            "color_at": EngineMethod(
+                name="color_at",
+                c_name="amipython_copper_color_at",
+                params=[],
+                return_type=AmipyType.VOID,
+                keywords={
+                    "scanline": (AmipyType.INT, None),
+                    "register": (AmipyType.INT, None),
+                    "color":    (AmipyType.INT, None),
+                },
+            ),
+        },
+    ),
     "sfx": EngineModuleType(
         python_name="sfx",
         functions={
@@ -726,4 +786,4 @@ BUILTINS: dict[str, EngineBuiltin] = {
 
 ALL_ENGINE_NAMES = (set(OBJECT_TYPES) | set(MODULE_TYPES) | set(BUILTINS)
                     | set(KEY_CONSTANTS)
-                    | {"run", "sin_table", "cos_table"})
+                    | {"run", "sin_table", "cos_table", "Color"})

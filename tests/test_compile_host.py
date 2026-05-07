@@ -683,3 +683,74 @@ c: bool = key.just_released(K_LEFT)
         assert "[input] key_pressed 0x40" in output
         assert "[input] key_just_pressed 0x19" in output
         assert "[input] key_just_released 0x4f" in output
+
+    def test_rnd_range(self):
+        output = _compile_and_run('''
+from amiga import rnd
+x: int = rnd(40, 180)
+''')
+        assert "[rnd_range] 40 180" in output
+
+    def test_rnd_range_with_one_arg_coexists(self):
+        output = _compile_and_run('''
+from amiga import rnd
+a: int = rnd(10, 20)
+b: int = rnd(5)
+''')
+        assert "[rnd_range] 10 20" in output
+        assert "[rnd] 5" in output
+
+    def test_dual_playfield_init_show_scroll(self):
+        output = _compile_and_run('''
+from amiga import DualPlayfield, Bitmap, palette, joy, run
+
+fg = Bitmap(640, 200, bitplanes=3)
+bg = Bitmap(320, 200, bitplanes=3)
+display = DualPlayfield(fg, bg)
+display.show()
+display.scroll_fg(48, 0)
+display.scroll_bg(-12, 8)
+''')
+        assert "[dpf] init 640x200" in output
+        assert "[dpf] show 640x200" in output
+        assert "[dpf] scroll_fg 48 0" in output
+        assert "[dpf] scroll_bg -12 8" in output
+
+    def test_copper_color_at_and_Color(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, palette, copper, Color, wait_mouse
+
+display = Display(320, 200, bitplanes=1)
+bm = Bitmap(320, 200, bitplanes=1)
+palette.set(0, 0, 0, 0)
+display.show(bm)
+
+copper.color_at(scanline=0,   register=0, color=Color(0, 0, 8))
+copper.color_at(scanline=100, register=0, color=Color(8, 0, 8))
+copper.color_at(scanline=199, register=0, color=Color(15, 8, 0))
+''')
+        assert "[copper] color_at 0 0 0x008" in output
+        assert "[copper] color_at 100 0 0x808" in output
+        assert "[copper] color_at 199 0 0xF80" in output
+
+    def test_sprite_overlaps(self):
+        output = _compile_and_run('''
+from amiga import Display, Bitmap, Sprite
+
+display = Display(320, 200, bitplanes=3)
+bm = Bitmap(320, 200, bitplanes=3)
+bm.box_filled(0, 0, 7, 7, 1)
+a = Sprite.grab(bm, 0, 0, 16, 16)
+b = Sprite.grab(bm, 0, 0, 16, 16)
+display.show(bm)
+
+a.show(50, 50, channel=0)
+b.show(58, 58, channel=1)
+hit: bool = a.overlaps(b)
+
+b.show(200, 200, channel=1)
+miss: bool = a.overlaps(b)
+''')
+        # Trace lines confirm the AABB inputs and outputs end-to-end.
+        assert "[sprite] overlaps (50,50 16x16) (58,58 16x16) -> 1" in output
+        assert "[sprite] overlaps (50,50 16x16) (200,200 16x16) -> 0" in output

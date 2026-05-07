@@ -146,6 +146,12 @@ LONG amipython_rnd(LONG n) {
     return n > 0 ? (LONG)(rand() % n) : 0;
 }
 
+LONG amipython_rnd_range(LONG lo, LONG hi) {
+    LONG span = hi - lo;
+    printf("[rnd_range] %ld %ld\n", lo, hi);
+    return span > 0 ? lo + (LONG)(rand() % span) : lo;
+}
+
 void amipython_shuffle(LONG *items, LONG count) {
     LONG i, j, tmp;
     for (i = count - 1; i > 0; i--) {
@@ -174,16 +180,63 @@ void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y,
     sprite->height = (UWORD)h;
     sprite->data = NULL;
     sprite->bCollided = 0;
+    sprite->lastX = -1000;
+    sprite->lastY = -1000;
     printf("[sprite] grab %ldx%ld from %ux%u at %ld,%ld\n", w, h, bm->width, bm->height, x, y);
 }
 
 void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel) {
+    sprite->lastX = (WORD)x;
+    sprite->lastY = (WORD)y;
     printf("[sprite] show %ux%u at %ld,%ld ch=%ld\n", sprite->width, sprite->height, x, y, channel);
 }
 
 BOOL amipython_sprite_collided(AmipySprite *sprite) {
     printf("[sprite] collided -> %d\n", sprite->bCollided);
     return sprite->bCollided ? TRUE : FALSE;
+}
+
+void amipython_copper_color_at(LONG scanline, LONG reg, LONG color) {
+    printf("[copper] color_at %ld %ld 0x%03lX\n", scanline, reg, color & 0xFFF);
+}
+
+void amipython_dual_playfield_init(AmipyDualPlayfield *dpf, AmipyBitmap *fg, AmipyBitmap *bg) {
+    dpf->width = fg->width;
+    dpf->height = fg->height;
+    dpf->pFgData = NULL;
+    dpf->pBgData = NULL;
+    dpf->scrollFgX = 0; dpf->scrollFgY = 0;
+    dpf->scrollBgX = 0; dpf->scrollBgY = 0;
+    printf("[dpf] init %ux%u (bg %ux%u)\n",
+           fg->width, fg->height, bg->width, bg->height);
+}
+
+void amipython_dual_playfield_show(AmipyDualPlayfield *dpf) {
+    printf("[dpf] show %ux%u\n", dpf->width, dpf->height);
+}
+
+void amipython_dual_playfield_scroll_fg(AmipyDualPlayfield *dpf, LONG x, LONG y) {
+    dpf->scrollFgX = (WORD)x;
+    dpf->scrollFgY = (WORD)y;
+    printf("[dpf] scroll_fg %ld %ld\n", x, y);
+}
+
+void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf, LONG x, LONG y) {
+    dpf->scrollBgX = (WORD)x;
+    dpf->scrollBgY = (WORD)y;
+    printf("[dpf] scroll_bg %ld %ld\n", x, y);
+}
+
+BOOL amipython_sprite_overlaps(AmipySprite *sprite, AmipySprite *other) {
+    WORD ax1 = sprite->lastX, ay1 = sprite->lastY;
+    WORD ax2 = ax1 + (WORD)sprite->width, ay2 = ay1 + (WORD)sprite->height;
+    WORD bx1 = other->lastX, by1 = other->lastY;
+    WORD bx2 = bx1 + (WORD)other->width, by2 = by1 + (WORD)other->height;
+    BOOL r = (ax2 > bx1 && bx2 > ax1 && ay2 > by1 && by2 > ay1) ? TRUE : FALSE;
+    printf("[sprite] overlaps (%d,%d %ux%u) (%d,%d %ux%u) -> %d\n",
+           ax1, ay1, sprite->width, sprite->height,
+           bx1, by1, other->width, other->height, r);
+    return r;
 }
 
 static LONG s_coll_color = 0;

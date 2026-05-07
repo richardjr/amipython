@@ -213,7 +213,10 @@ def convert_image_to_bytes(source_path: str) -> dict | None:
             row.append(pixel_data[y * width + x])
         pixels.append(row)
 
-    planar_data = _chunky_to_planar(pixels, aligned_width, height, depth)
+    # _chunky_to_planar takes the original width and aligns internally —
+    # passing aligned_width here makes it think the source row is wider
+    # than it is and overruns when width % 16 != 0 (e.g. the 60-wide amifish logo).
+    planar_data = _chunky_to_planar(pixels, width, height, depth)
 
     return {
         "data": planar_data,

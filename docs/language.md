@@ -446,6 +446,116 @@ File format is a tight `"AMPY"` + version + kind + big-endian payload — same
 bytes on both platforms so a preview save is technically portable, though in
 practice you save on the target.
 
+### Hardware Sprites
+
+Hardware sprites are grabbed from a bitmap and shown on one of 8 channels.
+Channel 0 is conventionally the player; channels 1..7 are free for game use.
+
+```python
+from amiga import Bitmap, Sprite, collision
+
+bm.box_filled(0, 0, 7, 7, 1)
+player = Sprite.grab(bm, 0, 0, 16, 16)   # width auto-aligned to 16
+
+player.show(120, 90, channel=0)          # last show() position is tracked
+player.show(122, 90, channel=0)          # call again each frame to move
+
+# Sprite-vs-playfield collision (CLXDAT-style colour-register mask)
+collision.register(color=15, mask=4)
+collision.check()
+hit_terrain: bool = player.collided()
+
+# Sprite-vs-sprite AABB overlap (software, no hardware register required)
+hit_fish: bool = player.overlaps(fish)
+```
+
+- `Sprite.grab(bm, x, y, w, h)` — grabs a region; width is rounded up to a
+  multiple of 16 (blitter word alignment).
+- `sprite.show(x, y, channel=N)` — positions the sprite. The last x/y are
+  stored on the sprite for `overlaps()` to read.
+- `sprite.collided()` — sprite-vs-playfield, set by the most recent
+  `collision.check()`.
+- `sprite.overlaps(other)` — half-open AABB on the last show() positions and
+  grabbed widths/heights. Touching edges count as separate.
+
+### Copper colour splits
+
+The Amiga copper coprocessor can rewrite a colour register at any scanline,
+giving smooth colour gradients for skies, water, score panels etc. — at zero
+CPU cost on real hardware.
+
+```python
+from amiga import copper, Color
+
+# Sky → sea gradient on register 1: deep blue at the top, lighter blue at
+# the waterline. Set up once (init time); the copper applies it every frame.
+for y in range(0, 40, 4):
+    t = y // 8
+    copper.color_at(scanline=y, register=1, color=Color(0, 1 + t, 5 + t))
+copper.color_at(scanline=40, register=1, color=Color(7, 12, 14))
+```
+
+- `copper.color_at(scanline=, register=, color=)` is keyword-only. `color`
+  is an OCS 12-bit packed value — usually built with `Color(r, g, b)`
+  where each channel is 0..15.
+- Calls register a one-shot copperlist entry. They persist for the lifetime
+  of the active display. Calling the same `(scanline, register)` twice adds
+  a second entry; the later one overrides for that scanline.
+- Register N's copper colour applies from its scanline downward until another
+  `color_at` for the same register fires. Sprite registers (16..31) work the
+  same way.
+- Up to 320 entries per program in the C runtime today (`AMIPY_COPPER_MAX`).
+- Register the gradient *before* `display.show()` if you want it live from
+  frame 1 — calls before show are buffered and installed at show time.
+
+### DualPlayfield (Hardware Dual Playfield)
+
+Real OCS dual-playfield mode — two 3-bitplane layers composited by the
+chipset, with the foreground's colour 0 transparent over the background.
+Built on a hand-rolled view + custom Copperlist (ACE has no DPF manager).
+
+```python
+from amiga import DualPlayfield, Bitmap, palette, run, joy
+
+fg = Bitmap(640, 200, bitplanes=3)   # double-width for seamless horizontal wrap
+bg = Bitmap(320, 200, bitplanes=3)
+
+# Standard OCS DPF palette layout:
+#   regs 0..7  -> playfield A (foreground; reg 0 transparent)
+#   regs 8..15 -> playfield B (background; reg 8 transparent)
+palette.set(0, 0, 0, 0)
+for i in range(1, 8):
+    palette.set(i, i * 2, 14, 4)     # FG colours
+palette.set(8, 0, 0, 4)
+for i in range(9, 16):
+    palette.set(i, 14, (i - 8) * 2, 2)  # BG colours
+
+display = DualPlayfield(fg, bg)
+display.show()
+
+x: int = 0
+def update():
+    global x
+    x = (x + 2) % 320
+    display.scroll_fg(x, 0)
+    # display.scroll_bg(x // 4, 0)  # parallax: bg drifts at 1/4 speed
+
+run(update, until=lambda: joy.button(0))
+```
+
+- `DualPlayfield(fg, bg)` — both Bitmaps must be 3-bitplane. Replaces
+  `Display`/`Bitmap` for the program's lifetime.
+- `display.show()` — installs the custom Copperlist, takes over the
+  hardware. Call once after construction.
+- `display.scroll_fg(x, y)` / `scroll_bg(x, y)` — independent integer-pixel
+  scroll on each playfield. Coarse scroll uses bitplane base offsets; fine
+  scroll within a 16-pixel word goes through BPLCON1.
+- For seamless horizontal wrap, allocate a wider bitmap (e.g. 640×200) and
+  paint a tileable pattern. Vertical scroll the same.
+- Sprites and the `copper` module work alongside DPF — both write to
+  hardware registers the DPF manager doesn't touch (`SPRxPT`, palette
+  regs 16..31, copper colour splits on any reg).
+
 ### Tilemap (Hardware Scrolling)
 
 Tile-based scrolling maps using ACE's tileBufferManager for hardware-accelerated scrolling:
@@ -541,6 +651,7 @@ wait_mouse()            # wait for left mouse button click
 vwait(1)                # wait for 1 vertical blank (1/50th second)
 vwait(3)                # wait for 3 vertical blanks (slower animation)
 rnd(100)                # random integer 0-99
+rnd(40, 180)            # random integer 40-179 (lo inclusive, hi exclusive)
 shuffle(lst)            # Fisher-Yates shuffle a list[int] in place
 int_to_str(42, 6)       # zero-padded decimal: "000042" (for scores, counters)
 int_to_str(-5, 4)       # sign-preserving: "-005"

@@ -37,6 +37,9 @@ class Backend:
         self._surfaces: weakref.WeakSet = weakref.WeakSet()
         self._active_surface = None  # surface set by display.show()
         self._active_tilemap = None  # set by tilemap.show()
+        # Per-scanline palette overrides recorded by copper.color_at().
+        # Each entry is (scanline, register, ocs_color_word).
+        self._copper_calls: list[tuple[int, int, int]] = []
 
     @classmethod
     def get(cls) -> Backend:
@@ -77,14 +80,55 @@ class Backend:
             surface.set_palette(self._palette)
 
     def present(self, surface: pygame.Surface) -> None:
-        """Scale an 8-bit surface to the window and flip."""
+        """Scale an 8-bit surface to the window and flip.
+
+        If copper.color_at() has been called, walks scanlines and applies
+        per-scanline palette overrides so the gradient is visible on the
+        same surface the C runtime would render on hardware.
+        """
         if not self._initialized:
             return
+        if self._copper_calls:
+            surface = self._render_with_copper(surface)
         scaled = pygame.transform.scale(
             surface, (self._width * self._scale, self._height * self._scale)
         )
         self._screen.blit(scaled, (0, 0))
         pygame.display.flip()
+
+    def _render_with_copper(self, indexed: pygame.Surface) -> pygame.Surface:
+        """Apply copper colour splits — for each scanline, blit one row at
+        a time with the effective palette for that line. The 1-row blits
+        run native pygame code and are fast enough for preview."""
+        w, h = indexed.get_size()
+        # Group calls by scanline so we apply all changes at the same Y in one pass.
+        overrides_by_y: dict[int, list[tuple[int, int]]] = {}
+        for y, reg, color in self._copper_calls:
+            overrides_by_y.setdefault(y, []).append((reg, color))
+
+        cur_pal = list(self._palette)
+        # Stash the original surface palette so we can put it back at the end —
+        # otherwise other code that holds a reference to `indexed` would see the
+        # mutated final-scanline palette next frame.
+        saved_pal = indexed.get_palette()
+
+        rgb = pygame.Surface((w, h))
+        for y in range(h):
+            ovr = overrides_by_y.get(y)
+            if ovr:
+                for reg, ocs_color in ovr:
+                    r4 = (ocs_color >> 8) & 0xF
+                    g4 = (ocs_color >> 4) & 0xF
+                    b4 = ocs_color & 0xF
+                    cur_pal[reg] = (r4 * 17, g4 * 17, b4 * 17)
+                indexed.set_palette(cur_pal)
+            elif y == 0:
+                # First row — make sure we start from base.
+                indexed.set_palette(cur_pal)
+            rgb.blit(indexed, (0, y), (0, y, w, 1))
+
+        indexed.set_palette(saved_pal)
+        return rgb
 
     def pump_events(self) -> list:
         """Process pygame events. Returns the event list."""

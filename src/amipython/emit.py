@@ -872,6 +872,11 @@ class _Emitter:
                     if call.func.id == "shuffle":
                         self._emit_shuffle(call)
                         return
+                    # rnd(lo, hi) — 2-arg form dispatches to amipython_rnd_range
+                    if call.func.id == "rnd" and len(call.args) == 2:
+                        args = ", ".join(self._emit_expr(a) for a in call.args)
+                        self._line(f"amipython_rnd_range({args});")
+                        return
                     args = ", ".join(self._emit_expr(a) for a in call.args)
                     self._line(f"{builtin.c_name}({args});")
                     return
@@ -970,8 +975,20 @@ class _Emitter:
         obj_type = OBJECT_TYPES[type_name]
         ctor = obj_type.constructor
 
-        # Build arg list: positional args + keyword args (fill defaults)
-        args = [self._emit_expr(a) for a in call.args]
+        # Build arg list: positional args + keyword args (fill defaults).
+        # Object-typed positional params (BITMAP, SHAPE, etc.) need to be
+        # passed by pointer — the C constructor signature expects a struct
+        # pointer so it can mutate the underlying state.
+        _OBJECT_PARAM_TYPES = {AmipyType.BITMAP, AmipyType.SHAPE,
+                               AmipyType.SPRITE, AmipyType.TILEMAP,
+                               AmipyType.DISPLAY, AmipyType.DUAL_PLAYFIELD}
+        args = []
+        for i, arg in enumerate(call.args):
+            expr = self._emit_expr(arg)
+            if i < len(ctor.positional) and ctor.positional[i].type in _OBJECT_PARAM_TYPES:
+                args.append(f"&{expr}")
+            else:
+                args.append(expr)
         # Tilemap constructor: first arg is tileset path — embed tileset data
         if type_name == "Tilemap" and args:
             tileset_info = self._embed_tileset(args[0])
@@ -1604,6 +1621,12 @@ class _Emitter:
                 if arg_type == AmipyType.FLOAT:
                     return f"(({arg}) < 0.0f ? -({arg}) : ({arg}))"
                 return f"(({arg}) < 0 ? -({arg}) : ({arg}))"
+            if name == "Color":
+                # Pack OCS 4-bit RGB into a 12-bit colour word: 0xRGB.
+                r = self._emit_expr(node.args[0])
+                g = self._emit_expr(node.args[1])
+                b = self._emit_expr(node.args[2])
+                return f"(((({r}) & 0xF) << 8) | ((({g}) & 0xF) << 4) | (({b}) & 0xF))"
             if name == "len":
                 arg = node.args[0]
                 if isinstance(arg, ast.Name):
@@ -1613,6 +1636,8 @@ class _Emitter:
             if name in BUILTINS and name in self.info.engine_imports:
                 builtin = BUILTINS[name]
                 args = ", ".join(self._emit_expr(a) for a in node.args)
+                if name == "rnd" and len(node.args) == 2:
+                    return f"amipython_rnd_range({args})"
                 return f"{builtin.c_name}({args})"
             # User function call
             args = ", ".join(self._emit_expr(a) for a in node.args)

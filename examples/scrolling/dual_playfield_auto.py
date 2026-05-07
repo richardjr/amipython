@@ -10,28 +10,36 @@
 # expose hardware dual-playfield mode and the manager has been deferred to a
 # future engine project; see project-vault ADR 0002 (hardware-dual-playfield).
 
-from amiga import DualPlayfield, Bitmap, joy, rnd, wrap, run
+from amiga import DualPlayfield, Bitmap, palette, joy, rnd, run
 
 # Foreground: twice the display width for seamless wrap
 fg = Bitmap(640, 200, bitplanes=3)
 for k in range(10):
     fg.circle_filled(rnd(256) + 32, rnd(200), rnd(24) + 8, rnd(7) + 1)
 
-# Copy left half to right half for seamless scrolling
-fg.copy_region(0, 0, 320, 200, 320, 0)
-
 # Background: random boxes
 bg = Bitmap(320, 200, bitplanes=3)
 for k in range(50):
     bg.box_filled(rnd(320), rnd(100) + 50, rnd(320), rnd(100) + 50, rnd(7) + 1)
 
-display = DualPlayfield(fg, bg)
+# OCS dual-playfield palettes:
+#   regs 0..7  -> playfield A (foreground; reg 0 transparent)
+#   regs 8..15 -> playfield B (background; reg 8 transparent)
+palette.set(0, 0, 0, 0)   # PFA transparent
+for i in range(1, 8):
+    palette.set(i, i * 2, 14, 4)
+palette.set(8, 0, 0, 4)   # PFB base (bg colour)
+for i in range(9, 16):
+    palette.set(i, 14, (i - 8) * 2, 2)
 
-x = 0
+display = DualPlayfield(fg, bg)
+display.show()
+
+x: int = 0
 
 def update():
     global x
-    x = int(wrap(x + 2, 0, 320))
+    x = (x + 2) % 320
     display.scroll_fg(x, 0)
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

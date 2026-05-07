@@ -20,6 +20,7 @@
 #include <ace/managers/copper.h>
 #include <ace/managers/mouse.h>
 #include <ace/managers/ptplayer.h>
+#include <ace/managers/sprite.h>
 #include <ace/managers/viewport/simplebuffer.h>
 #include <ace/managers/viewport/tilebuffer.h>
 #include <ace/managers/joy.h>
@@ -29,11 +30,41 @@
 #include <ace/utils/chunky.h>
 #include <ace/utils/palette.h>
 
+/* DualPlayfield bit-depth (always 6 in OCS DPF mode — 3 PFA + 3 PFB).
+ * Defined here so palette helpers can reference it without forward-declaring
+ * the whole DPF section. */
+#define AMIPY_DPF_BPP 6
+
+/* Sprite manager state — one slot per hardware channel. */
+#define AMIPY_SPRITE_CHANNELS 8
+static AmipySprite *s_apSpritesByChannel[AMIPY_SPRITE_CHANNELS] = {0};
+static UBYTE s_bSpriteManagerActive = 0;
+
+/* Copper-driven per-scanline colour overrides. Buffered until display.show
+ * has loaded a view; then each entry becomes a 1-MOVE copBlock that fires
+ * at the start of its scanline. (Helpers are defined further down so they
+ * can refer to s_pActiveDisplay.) */
+typedef struct {
+    UWORD scanline;
+    UBYTE reg;
+    UWORD color;          /* OCS 12-bit 0x0RGB */
+    tCopBlock *pBlock;    /* set once installed; NULL while pending */
+} AmipyCopperEntry;
+
+#define AMIPY_COPPER_MAX 320
+static AmipyCopperEntry s_aCopper[AMIPY_COPPER_MAX];
+static UWORD s_uCopperCount = 0;
+
 /* Global ACE state — the display that's currently active */
 static AmipyDisplay *s_pActiveDisplay = 0;
 static AmipyBitmap *s_pActiveBitmap = 0;  /* user bitmap linked via show() */
 static AmipyTilemap *s_pActiveTilemap = 0;
+static AmipyDualPlayfield *s_pActiveDualPlayfield = 0;
 static tPtplayerMod *s_pMod = 0;
+
+/* Forward declarations needed by engine_destroy (defined further down). */
+#define AMIPYTHON_SFX_SLOTS 8
+static void _sfx_free_slot(LONG slot);
 
 /* Palette buffer — stores colors set before display.show() */
 #define PALETTE_MAX 256
@@ -45,6 +76,60 @@ static UBYTE s_bHasPendingPalette = 0;
 static UWORD s_pTargetPalette[PALETTE_MAX];
 static UBYTE s_bTargetSet[PALETTE_MAX];
 static LONG s_bFadeLevel = 15;  /* 0=black, 15=full brightness */
+
+/* Copper helpers — defined here so they can see s_pActiveDisplay. */
+static void _installCopperEntry(UWORD i) {
+    AmipyCopperEntry *e = &s_aCopper[i];
+    UWORD waitY;
+    volatile UWORD *pColorReg;
+    if (!s_pActiveDisplay || !s_pActiveDisplay->pView) return;
+    waitY = e->scanline + s_pActiveDisplay->pView->ubPosY;
+    pColorReg = (volatile UWORD *)(0xDFF180UL + ((ULONG)e->reg << 1));
+    e->pBlock = copBlockCreate(s_pActiveDisplay->pView->pCopList, 1, 0, waitY);
+    if (e->pBlock) {
+        copMove(s_pActiveDisplay->pView->pCopList, e->pBlock,
+                (volatile void *)pColorReg, e->color);
+    }
+}
+
+static void _flushPendingCopper(void) {
+    UWORD i;
+    for (i = 0; i < s_uCopperCount; i++) {
+        if (!s_aCopper[i].pBlock) {
+            _installCopperEntry(i);
+        }
+    }
+}
+
+static void _destroyCopperBlocks(void) {
+    UWORD i;
+    if (!s_pActiveDisplay || !s_pActiveDisplay->pView) {
+        s_uCopperCount = 0;
+        return;
+    }
+    for (i = 0; i < s_uCopperCount; i++) {
+        if (s_aCopper[i].pBlock) {
+            copBlockDestroy(s_pActiveDisplay->pView->pCopList,
+                            s_aCopper[i].pBlock);
+            s_aCopper[i].pBlock = 0;
+        }
+    }
+    s_uCopperCount = 0;
+}
+
+void amipython_copper_color_at(LONG scanline, LONG reg, LONG color) {
+    AmipyCopperEntry *e;
+    if (s_uCopperCount >= AMIPY_COPPER_MAX) return;
+    e = &s_aCopper[s_uCopperCount];
+    e->scanline = (UWORD)scanline;
+    e->reg = (UBYTE)reg;
+    e->color = (UWORD)(color & 0xFFF);
+    e->pBlock = 0;
+    s_uCopperCount++;
+    if (s_pActiveDisplay && s_pActiveDisplay->pView) {
+        _installCopperEntry(s_uCopperCount - 1);
+    }
+}
 
 void amipython_engine_create(void) {
     systemCreate();
@@ -65,6 +150,10 @@ void amipython_engine_destroy(void) {
         ptplayerModDestroy(s_pMod);
         s_pMod = 0;
     }
+    {
+        LONG _i;
+        for (_i = 0; _i < AMIPYTHON_SFX_SLOTS; ++_i) _sfx_free_slot(_i);
+    }
     ptplayerDestroy();
     if (s_pActiveTilemap && s_pActiveTilemap->pView) {
         viewLoad(0);
@@ -77,7 +166,36 @@ void amipython_engine_destroy(void) {
         s_pActiveTilemap->pView = 0;
         s_pActiveTilemap->pVPort = 0;
         s_pActiveTilemap->pTileBfr = 0;
+    } else if (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pView) {
+        viewLoad(0);
+        systemUse();
+        if (s_pActiveDualPlayfield->pCopBlock) {
+            copBlockDestroy(s_pActiveDualPlayfield->pView->pCopList,
+                            (tCopBlock *)s_pActiveDualPlayfield->pCopBlock);
+            s_pActiveDualPlayfield->pCopBlock = 0;
+        }
+        viewDestroy(s_pActiveDualPlayfield->pView);
+        s_pActiveDualPlayfield->pView = 0;
+        s_pActiveDualPlayfield->pVPort = 0;
     } else if (s_pActiveDisplay && s_pActiveDisplay->pView) {
+        /* Free copper blocks before tearing down the view. */
+        _destroyCopperBlocks();
+        /* Tear sprites down before viewLoad(0); spriteManagerDestroy walks
+         * the per-channel chains so we have to remove our sprites first. */
+        if (s_bSpriteManagerActive) {
+            LONG ch;
+            for (ch = 0; ch < AMIPY_SPRITE_CHANNELS; ch++) {
+                AmipySprite *sp = s_apSpritesByChannel[ch];
+                if (sp && sp->pAceSprite) {
+                    spriteRemove(sp->pAceSprite);
+                    sp->pAceSprite = 0;
+                }
+                s_apSpritesByChannel[ch] = 0;
+            }
+            systemSetDmaBit(DMAB_SPRITE, 0);
+            spriteManagerDestroy();
+            s_bSpriteManagerActive = 0;
+        }
         viewLoad(0);
         systemUse();
         /* User bitmap was redirected to pBfr->pBack in display_show.
@@ -128,18 +246,30 @@ void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp) {
     );
 }
 
+/* Forward decls — _flushPendingPalette uses generic active-view helpers
+ * that are defined further down. */
+static UBYTE _activeBitplanes(void);
+static struct _tVPort *_activeVPort(void);
+
 static void _flushPendingPalette(AmipyDisplay *d) {
-    if (s_bHasPendingPalette && d->pVPort) {
-        LONG maxColors = 1L << d->bitplanes;
-        LONG i;
-        for (i = 0; i < maxColors && i < PALETTE_MAX; i++) {
-            if (s_bPaletteBuffered[i]) {
-                d->pVPort->pPalette[i] = s_pPaletteBuffer[i];
-                s_bPaletteBuffered[i] = 0;
-            }
+    /* Generic across Display + DualPlayfield. The `d` parameter is kept
+     * for source compatibility but we resolve the live vport via the
+     * active-view helpers so the same flush works for either path. */
+    UBYTE bitplanes = _activeBitplanes();
+    tVPort *pVPort = _activeVPort();
+    LONG maxColors;
+    LONG i;
+    (void)d;
+    if (!s_bHasPendingPalette || !pVPort) return;
+    maxColors = 1L << bitplanes;
+    if (maxColors > 32) maxColors = 32;   /* OCS color reg limit */
+    for (i = 0; i < maxColors && i < PALETTE_MAX; i++) {
+        if (s_bPaletteBuffered[i]) {
+            pVPort->pPalette[i] = s_pPaletteBuffer[i];
+            s_bPaletteBuffered[i] = 0;
         }
-        s_bHasPendingPalette = 0;
     }
+    s_bHasPendingPalette = 0;
 }
 
 static void _dirtyReset(AmipyBitmap *bm);
@@ -189,6 +319,19 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
     /* Load view + take over hardware */
     viewLoad(d->pView);
     systemUnuse();
+
+    /* Spin up the sprite manager once the view is live. systemSetDmaBit
+     * enables sprite DMA; spriteManagerCreate hooks in 16 copper commands
+     * starting at position 0 of the view's copperlist. Idempotent: if
+     * display.show() is called twice we leave the existing manager alone. */
+    if (!s_bSpriteManagerActive) {
+        spriteManagerCreate(d->pView, 0, 0);
+        systemSetDmaBit(DMAB_SPRITE, 1);
+        s_bSpriteManagerActive = 1;
+    }
+
+    /* Install any copper.color_at entries that were buffered before show(). */
+    _flushPendingCopper();
 
     /* Clamp mouse coordinates to bitmap dimensions */
     mouseSetBounds(MOUSE_PORT_1, 0, 0, (UWORD)(d->width - 1), (UWORD)(d->height - 1));
@@ -361,16 +504,48 @@ void amipython_bitmap_plot(AmipyBitmap *bm, LONG x, LONG y, LONG color) {
     }
 }
 
+/* Returns the currently-active vport's bitplane depth, or 0 if neither a
+ * Display nor a DualPlayfield is showing. */
+static UBYTE _activeBitplanes(void) {
+    if (s_pActiveDisplay && s_pActiveDisplay->pVPort)
+        return s_pActiveDisplay->bitplanes;
+    if (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pVPort)
+        return AMIPY_DPF_BPP;
+    return 0;
+}
+
+static struct _tVPort *_activeVPort(void) {
+    if (s_pActiveDisplay && s_pActiveDisplay->pVPort)
+        return s_pActiveDisplay->pVPort;
+    if (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pVPort)
+        return s_pActiveDualPlayfield->pVPort;
+    return 0;
+}
+
 static void _palette_apply_fade(void) {
     /* Write faded palette directly to hardware custom color registers.
-     * The copper rewrites palette from its instruction list each frame,
-     * so we also re-apply in vwait after the copper has run. */
-    if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-        UBYTE colorCount = (UBYTE)(1 << s_pActiveDisplay->bitplanes);
-        volatile UWORD *hwColor = (volatile UWORD *)0xDFF180;
-        paletteDim(s_pTargetPalette, hwColor, colorCount, (UBYTE)s_bFadeLevel);
-        /* Also update ACE's RAM copy for consistency */
-        paletteDim(s_pTargetPalette, s_pActiveDisplay->pVPort->pPalette,
+     * The copper rewrites playfield palette regs from its instruction list
+     * each frame, so we also re-apply in vwait after the copper has run.
+     *
+     * Sprite palette lives in regs 16..31, which the playfield copperlist
+     * does not touch. When the sprite manager is active we widen the
+     * hardware write to all 32 regs so palette.set(17..) reaches the
+     * hardware. The OCS color register file is 32 entries; deeper
+     * displays (e.g. DPF at 6 bitplanes = 64 entries logical) still cap
+     * the hardware write at 32 to avoid scribbling past 0xDFF1BE.
+     * ACE's pVPort->pPalette is sized for the playfield slice. */
+    UBYTE bitplanes = _activeBitplanes();
+    tVPort *pVPort = _activeVPort();
+    if (bitplanes && pVPort) {
+        UWORD logicalCount = (UWORD)(1 << bitplanes);
+        UBYTE colorCount = logicalCount > 32 ? 32 : (UBYTE)logicalCount;
+        UBYTE hwCount = colorCount;
+        if (s_bSpriteManagerActive && hwCount < 32) hwCount = 32;
+        {
+            volatile UWORD *hwColor = (volatile UWORD *)0xDFF180;
+            paletteDim(s_pTargetPalette, hwColor, hwCount, (UBYTE)s_bFadeLevel);
+        }
+        paletteDim(s_pTargetPalette, pVPort->pPalette,
                    colorCount, (UBYTE)s_bFadeLevel);
     }
 }
@@ -385,8 +560,9 @@ void amipython_palette_aga(LONG reg, LONG r, LONG g, LONG b) {
           | (UWORD)((b >> 4) & 0xF);
     s_pTargetPalette[reg] = color;
     s_bTargetSet[reg] = 1;
-    if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-        /* Display active — apply with fade directly to hardware */
+    if (_activeVPort()) {
+        /* A view is loaded (Display or DualPlayfield) — apply with fade
+         * directly to hardware. */
         _palette_apply_fade();
     } else {
         /* Buffer for later — store the already-faded value */
@@ -403,7 +579,7 @@ void amipython_palette_set(LONG reg, LONG r, LONG g, LONG b) {
     color = (UWORD)((r & 0xF) << 8) | (UWORD)((g & 0xF) << 4) | (UWORD)(b & 0xF);
     s_pTargetPalette[reg] = color;
     s_bTargetSet[reg] = 1;
-    if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
+    if (_activeVPort()) {
         _palette_apply_fade();
     } else {
         s_pPaletteBuffer[reg] = paletteColorDim(color, (UBYTE)s_bFadeLevel);
@@ -421,21 +597,44 @@ void amipython_palette_fade(LONG level) {
 
 void amipython_wait_mouse(void) {
     /* Poll until left mouse button is clicked */
+    tVPort *pVp = _activeVPort();
     while (!mouseUse(MOUSE_PORT_1, MOUSE_LMB)) {
         mouseProcess();
-        if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
-            vPortWaitForEnd(s_pActiveDisplay->pVPort);
+        if (pVp) {
+            vPortWaitForEnd(pVp);
         }
     }
 }
 
 void amipython_vwait(LONG n) {
     LONG i;
-    if (s_pActiveDisplay && s_pActiveDisplay->pVPort) {
+    tVPort *pVp = _activeVPort();
+    if (pVp) {
         for (i = 0; i < n; i++) {
             joyProcess();
             blitWait();
-            vPortWaitForEnd(s_pActiveDisplay->pVPort);
+            /* Two passes per frame for sprites, both required:
+             *   spriteProcess(sp)        — rebuilds the sprite's POS/CTL
+             *                              header in its bitmap if dirty.
+             *   spriteProcessChannel(ch) — points the channel's copBlock
+             *                              at the sprite's bitmap address.
+             * Both early-out cheaply when nothing has changed, so walking
+             * all 8 channels each frame is fine. */
+            if (s_bSpriteManagerActive) {
+                LONG ch;
+                for (ch = 0; ch < AMIPY_SPRITE_CHANNELS; ch++) {
+                    AmipySprite *sp = s_apSpritesByChannel[ch];
+                    if (sp && sp->pAceSprite) {
+                        spriteProcess(sp->pAceSprite);
+                    }
+                    spriteProcessChannel((UBYTE)ch);
+                }
+            }
+            /* Always run copProcessBlocks when there's an active view —
+             * DualPlayfield's scroll updates rewrite copBlock contents
+             * each frame and need this to land in the live copperlist. */
+            copProcessBlocks();
+            vPortWaitForEnd(pVp);
             /* Re-apply palette fade after copper has rewritten registers */
             if (s_bFadeLevel < 15) {
                 _palette_apply_fade();
@@ -638,29 +837,94 @@ void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y,
     UWORD uh = (UWORD)h;
     sprite->width = uw;
     sprite->height = uh;
-    sprite->bitplanes = bm->bitplanes;
-    sprite->ubChannel = 0;
+    sprite->bitplanes = 2;            /* hardware sprites are always 2BPP */
+    sprite->ubChannel = 0xFF;         /* unassigned until first show() */
     sprite->bCollided = 0;
-    sprite->pBitmap = bitmapCreate(uw, uh, bm->bitplanes, BMF_CLEAR);
+    sprite->lastX = -1000;
+    sprite->lastY = -1000;
+    sprite->pAceSprite = 0;
+
+    /* Hardware sprites are 16 px wide. Allocate a 16×(h+2) 2BPP interleaved
+     * bitmap; rows 0 and h+1 are the control-word header/footer the sprite
+     * manager writes into. Source-bitmap rect [x,y,16,h] is copied into
+     * rows 1..h, taking the lower two bitplanes only — anything beyond that
+     * is silently discarded (sprite art that needs >4 colours has to use
+     * sprite-attached pairs, which we don't manage yet). */
+    sprite->pBitmap = bitmapCreate(16, (UWORD)(uh + 2), 2,
+                                   BMF_CLEAR | BMF_INTERLEAVED);
     if (sprite->pBitmap && bm->pBitmap) {
-        blitWait();
-        blitCopy(
-            bm->pBitmap, (WORD)x, (WORD)y,
-            sprite->pBitmap, 0, 0,
-            uw, uh,
-            MINTERM_COOKIE
-        );
+        UBYTE plane;
+        UWORD row;
+        UWORD srcStride = bm->pBitmap->BytesPerRow;          /* per-plane (non-interleaved) */
+        UWORD dstStride = sprite->pBitmap->BytesPerRow;      /* interleaved: includes both planes */
+        UWORD srcXBytes = (UWORD)(x / 8);
+        UBYTE planesAvail = bm->pBitmap->Depth < 2 ? bm->pBitmap->Depth : 2;
+        for (plane = 0; plane < planesAvail; plane++) {
+            UBYTE *pSrc = (UBYTE *)bm->pBitmap->Planes[plane];
+            UBYTE *pDst = (UBYTE *)sprite->pBitmap->Planes[plane];
+            if (!pSrc || !pDst) continue;
+            for (row = 0; row < uh; row++) {
+                UWORD srcOff = (UWORD)((UWORD)y + row) * srcStride + srcXBytes;
+                UWORD dstOff = (UWORD)(row + 1) * dstStride;  /* +1 skips header row */
+                pDst[dstOff]     = pSrc[srcOff];
+                pDst[dstOff + 1] = pSrc[srcOff + 1];
+            }
+        }
     }
 }
 
 void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel) {
-    /* TODO: Use ACE sprite manager or direct copper/DMA */
-    sprite->ubChannel = (UBYTE)channel;
-    (void)x; (void)y;
+    UBYTE ch = (UBYTE)channel;
+    sprite->lastX = (WORD)x;
+    sprite->lastY = (WORD)y;
+    if (!s_bSpriteManagerActive || !sprite->pBitmap) return;
+    if (ch >= AMIPY_SPRITE_CHANNELS) return;
+
+    /* First show, or channel changed — (re)register with ACE. */
+    if (sprite->ubChannel != ch || !sprite->pAceSprite) {
+        if (sprite->pAceSprite) {
+            spriteRemove(sprite->pAceSprite);
+            if (sprite->ubChannel < AMIPY_SPRITE_CHANNELS &&
+                s_apSpritesByChannel[sprite->ubChannel] == sprite) {
+                s_apSpritesByChannel[sprite->ubChannel] = 0;
+            }
+            sprite->pAceSprite = 0;
+        }
+        /* If something else owned this channel, kick it out (single sprite
+         * per channel — last show() wins). */
+        if (s_apSpritesByChannel[ch]) {
+            AmipySprite *other = s_apSpritesByChannel[ch];
+            if (other->pAceSprite) {
+                spriteRemove(other->pAceSprite);
+                other->pAceSprite = 0;
+            }
+            other->ubChannel = 0xFF;
+        }
+        sprite->pAceSprite = spriteAdd(ch, sprite->pBitmap);
+        sprite->ubChannel = ch;
+        s_apSpritesByChannel[ch] = sprite;
+    }
+    if (sprite->pAceSprite) {
+        sprite->pAceSprite->wX = (WORD)x;
+        sprite->pAceSprite->wY = (WORD)y;
+        spriteRequestMetadataUpdate(sprite->pAceSprite);
+    }
 }
 
 BOOL amipython_sprite_collided(AmipySprite *sprite) {
     return sprite->bCollided ? TRUE : FALSE;
+}
+
+BOOL amipython_sprite_overlaps(AmipySprite *sprite, AmipySprite *other) {
+    /* AABB on the last show() positions and grabbed widths/heights.
+       Half-open interval — touching edges count as separate, not overlapping. */
+    WORD ax1 = sprite->lastX, ay1 = sprite->lastY;
+    WORD ax2 = ax1 + (WORD)sprite->width, ay2 = ay1 + (WORD)sprite->height;
+    WORD bx1 = other->lastX, by1 = other->lastY;
+    WORD bx2 = bx1 + (WORD)other->width, by2 = by1 + (WORD)other->height;
+    if (ax2 <= bx1 || bx2 <= ax1) return FALSE;
+    if (ay2 <= by1 || by2 <= ay1) return FALSE;
+    return TRUE;
 }
 
 static LONG s_coll_color = 0;
@@ -995,6 +1259,12 @@ LONG amipython_rnd(LONG n) {
     return (LONG)((s_seed >> 16) % (unsigned long)n);
 }
 
+LONG amipython_rnd_range(LONG lo, LONG hi) {
+    LONG span = hi - lo;
+    if (span <= 0) return lo;
+    return lo + amipython_rnd(span);
+}
+
 void amipython_shuffle(LONG *items, LONG count) {
     LONG i, j;
     LONG tmp;
@@ -1234,18 +1504,47 @@ BOOL amipython_key_just_released(LONG code) {
 }
 
 /* --- Sound effects --- */
-/* v1: samples are stored in memory per slot; actual ptplayer sfx integration
- * is a TODO once we have real sample assets. Calls log through the ACE debug
- * stream and are safe to invoke. */
-#define AMIPYTHON_SFX_SLOTS 8
-typedef struct { const UBYTE *data; ULONG size; UWORD rate; } _SfxSlot;
+/* Embedded WAV samples (8-bit signed mono) are copied into chip RAM at
+ * load time and played via ptplayerSfxPlay. ptplayer expects sample data
+ * in chip RAM at an even address with length in words and a hardware
+ * replay period. Period for PAL: 3546895 / sample_rate.
+ * AMIPYTHON_SFX_SLOTS is forward-declared near the top of the file so
+ * engine_destroy can free all slots. */
+typedef struct {
+    UBYTE *pChipData;     /* chip-RAM allocation, NULL when unloaded */
+    ULONG ulChipSize;     /* bytes allocated, for memFree */
+    tPtplayerSfx sfx;     /* descriptor passed to ptplayerSfxPlay */
+} _SfxSlot;
 static _SfxSlot s_sfx[AMIPYTHON_SFX_SLOTS];
+
+static void _sfx_free_slot(LONG slot) {
+    if (slot < 0 || slot >= AMIPYTHON_SFX_SLOTS) return;
+    _SfxSlot *s = &s_sfx[slot];
+    if (s->pChipData) {
+        memFree(s->pChipData, s->ulChipSize);
+        s->pChipData = 0;
+        s->ulChipSize = 0;
+    }
+    s->sfx.pData = 0;
+    s->sfx.uwWordLength = 0;
+    s->sfx.uwPeriod = 0;
+}
 
 void amipython_sfx_load_embedded(LONG slot, const UBYTE *data, ULONG size, UWORD rate) {
     if (slot < 0 || slot >= AMIPYTHON_SFX_SLOTS) return;
-    s_sfx[slot].data = data;
-    s_sfx[slot].size = size;
-    s_sfx[slot].rate = rate;
+    if (!data || size < 2 || rate == 0) return;
+    _sfx_free_slot(slot);
+    /* Paula reads in words — round byte count down to even. */
+    ULONG copyBytes = size & ~1UL;
+    UBYTE *chip = (UBYTE *)memAllocChip(copyBytes);
+    if (!chip) return;
+    CopyMem((APTR)data, (APTR)chip, copyBytes);
+    _SfxSlot *s = &s_sfx[slot];
+    s->pChipData = chip;
+    s->ulChipSize = copyBytes;
+    s->sfx.pData = (UWORD *)chip;
+    s->sfx.uwWordLength = (UWORD)(copyBytes / 2);
+    s->sfx.uwPeriod = (UWORD)(3546895UL / (ULONG)rate);
 }
 
 void amipython_sfx_load(LONG slot, const char *path) {
@@ -1255,14 +1554,23 @@ void amipython_sfx_load(LONG slot, const char *path) {
 
 void amipython_sfx_play(LONG slot, LONG channel, LONG volume) {
     if (slot < 0 || slot >= AMIPYTHON_SFX_SLOTS) return;
-    if (!s_sfx[slot].data) return;
-    /* TODO: wire to ptplayerSfxPlay once sample struct construction is in. */
-    (void)channel; (void)volume;
+    _SfxSlot *s = &s_sfx[slot];
+    if (!s->pChipData || s->sfx.uwWordLength == 0) return;
+    /* Python's `channel` parameter is a pygame software-mixer channel and
+     * doesn't map to Paula's 4 hardware channels. Always let ptplayer pick
+     * the least-active channel so SFX never permanently steals the same
+     * music channel. */
+    (void)channel;
+    UBYTE ubVolume = (volume < 0) ? 0
+                    : (volume > PTPLAYER_VOLUME_MAX) ? PTPLAYER_VOLUME_MAX
+                    : (UBYTE)volume;
+    ptplayerSfxPlay(&s->sfx, PTPLAYER_SFX_CHANNEL_ANY, ubVolume, 1);
 }
 
 void amipython_sfx_stop(LONG slot) {
+    /* No per-slot channel tracking with auto-channel selection. No-op —
+     * sfx are short and end naturally. */
     (void)slot;
-    /* TODO: ptplayer channel stop */
 }
 
 /* --- Persistent storage (PROGDIR:<name>.dat via dos.library) --- */
@@ -1450,6 +1758,200 @@ static UBYTE _tileShiftFromSize(LONG tile_size) {
     LONG v = tile_size;
     while (v > 1) { v >>= 1; shift++; }
     return shift;
+}
+
+
+/* ===========================================================
+ * DualPlayfield — hand-rolled OCS dual-playfield manager.
+ *
+ * ACE doesn't expose hardware DPF mode (no manager, no helpers — confirmed
+ * by grepping its includes). We build it ourselves on top of the existing
+ * `viewCreate` / `vPortCreate` primitives plus a custom 17-MOVE copBlock
+ * that wires the per-frame fetch parameters:
+ *
+ *   slot 0: DDFSTOP        (data fetch stop)
+ *   slot 1: DDFSTRT        (data fetch start)
+ *   slot 2: BPL1MOD        (PFA bitplane modulo — odd planes)
+ *   slot 3: BPL2MOD        (PFB bitplane modulo — even planes)
+ *   slot 4: BPLCON1        (PFA fine scroll low nibble | PFB high nibble)
+ *   slot 5+6:  BPL1PT      (PFA plane 0)
+ *   slot 7+8:  BPL2PT      (PFB plane 0)
+ *   slot 9+10: BPL3PT      (PFA plane 1)
+ *   slot 11+12: BPL4PT     (PFB plane 1)
+ *   slot 13+14: BPL5PT     (PFA plane 2)
+ *   slot 15+16: BPL6PT     (PFB plane 2)
+ *
+ * BPLCON0 (DPF bit + 6 bitplanes) and BPLCON2 (PFn priority) are written
+ * once directly to hardware in `_show()` — putting them in the per-frame
+ * copBlock made them fire mid-fetch on the first visible scanline (the
+ * WAIT-X=0xD9 timing only leaves ~10 cycles before scanline ubPosY starts,
+ * but the block has 17+ MOVEs so the tail spills past DDFSTRT). simpleBuffer
+ * works around this for its bitplane setup by relying on viewLoad's
+ * synchronous BPLCON0 write — we do the same.
+ *
+ * Scroll updates rewind the block to slot 4 and re-emit BPLCON1 + the six
+ * BPLxPT pairs, matching the same value-overwrite pattern simpleBuffer uses.
+ * Coarse horizontal scroll is implemented via the bitplane base offset;
+ * BPLCON1's nibbles handle the 0..15 fine scroll within a word.
+ * =========================================================== */
+
+#define AMIPY_DPF_PLANES_PER_FIELD 3
+#define AMIPY_DPF_DDF_REWIND_SLOT 4  /* skip slots 0..3 on scroll updates */
+
+static UWORD _dpfPackScroll(WORD fgX, WORD bgX) {
+    /* BPLCON1 bits 3..0 = PFA scroll, 7..4 = PFB scroll. We keep the high
+     * nibble of each playfield's scroll as the value to write. */
+    UWORD pfa = (UWORD)(fgX & 0xF);
+    UWORD pfb = (UWORD)(bgX & 0xF);
+    return (pfb << 4) | pfa;
+}
+
+static ULONG _dpfPlaneAddr(struct BitMap *pBm, UBYTE plane,
+                           WORD scrollX, WORD scrollY) {
+    ULONG bpr = (ULONG)pBm->BytesPerRow;
+    /* coarse-x: pixels-per-word (16) -> 2 bytes per word */
+    LONG coarseX = scrollX >> 4;
+    if (coarseX < 0) coarseX = 0;
+    return (ULONG)pBm->Planes[plane]
+         + ((ULONG)scrollY * bpr)
+         + ((ULONG)coarseX * 2UL);
+}
+
+static void _dpfWriteBitplanePtrs(AmipyDualPlayfield *dpf) {
+    /* Rewind copBlock to BPLCON1 slot, then re-emit BPLCON1 + 6 BPLxPT
+     * pairs. Slots 0..3 (DDF + modulos) stay as written at init. */
+    tCopList *pCopList = dpf->pView->pCopList;
+    tCopBlock *pBlock = (tCopBlock *)dpf->pCopBlock;
+    UBYTE i;
+    pBlock->uwCurrCount = AMIPY_DPF_DDF_REWIND_SLOT;
+    copMove(pCopList, pBlock, &g_pCustom->bplcon1,
+            _dpfPackScroll(dpf->scrollFgX, dpf->scrollBgX));
+    for (i = 0; i < AMIPY_DPF_PLANES_PER_FIELD; i++) {
+        ULONG fgAddr = _dpfPlaneAddr(dpf->pFgBitmap, i,
+                                     dpf->scrollFgX, dpf->scrollFgY);
+        ULONG bgAddr = _dpfPlaneAddr(dpf->pBgBitmap, i,
+                                     dpf->scrollBgX, dpf->scrollBgY);
+        /* Odd hardware bitplanes (1, 3, 5) -> PFA */
+        copMove(pCopList, pBlock, &g_pBplFetch[i * 2].uwHi,
+                (UWORD)(fgAddr >> 16));
+        copMove(pCopList, pBlock, &g_pBplFetch[i * 2].uwLo,
+                (UWORD)(fgAddr & 0xFFFF));
+        /* Even hardware bitplanes (2, 4, 6) -> PFB */
+        copMove(pCopList, pBlock, &g_pBplFetch[i * 2 + 1].uwHi,
+                (UWORD)(bgAddr >> 16));
+        copMove(pCopList, pBlock, &g_pBplFetch[i * 2 + 1].uwLo,
+                (UWORD)(bgAddr & 0xFFFF));
+    }
+}
+
+/* Display window for DPF — fixed at standard PAL lores 320×200 for now.
+ * Source bitmaps may be larger (e.g. 640×200) — only a windowW×windowH
+ * region is visible at a time, with scroll_fg / scroll_bg picking which
+ * part of each source bitmap shows through the window. */
+#define AMIPY_DPF_WINDOW_W 320
+#define AMIPY_DPF_WINDOW_H 200
+
+void amipython_dual_playfield_init(AmipyDualPlayfield *dpf,
+                                   AmipyBitmap *fg, AmipyBitmap *bg) {
+    UWORD windowW = AMIPY_DPF_WINDOW_W;
+    UWORD windowH = AMIPY_DPF_WINDOW_H;
+    UWORD modFg, modBg;
+    UWORD ddfStrt, ddfStop;
+    tCopList *pCopList;
+    tCopBlock *pBlock;
+
+    dpf->width = windowW;
+    dpf->height = windowH;
+    dpf->pFgBitmap = fg->pBitmap;
+    dpf->pBgBitmap = bg->pBitmap;
+    dpf->scrollFgX = 0;
+    dpf->scrollFgY = 0;
+    dpf->scrollBgX = 0;
+    dpf->scrollBgY = 0;
+
+    dpf->pView = viewCreate(0,
+        TAG_VIEW_WINDOW_HEIGHT, windowH,
+        TAG_DONE
+    );
+    /* 6-bitplane vport — we will not use simpleBuffer; just need the
+     * view + vport structure so ACE wires DIWSTRT/DIWSTOP and the global
+     * BPLCON0 base value. We override BPLCON0 in our copBlock to add
+     * the DPF bit. */
+    dpf->pVPort = vPortCreate(0,
+        TAG_VPORT_VIEW, dpf->pView,
+        TAG_VPORT_BPP, (UWORD)AMIPY_DPF_BPP,
+        TAG_VPORT_WIDTH, windowW,
+        TAG_VPORT_HEIGHT, windowH,
+        TAG_DONE
+    );
+
+    /* Modulos: full-bitmap-row-bytes minus the visible window-row-bytes,
+     * per playfield — bitmaps wider than the window scroll continuously. */
+    modFg = (UWORD)(dpf->pFgBitmap->BytesPerRow - (windowW >> 3));
+    modBg = (UWORD)(dpf->pBgBitmap->BytesPerRow - (windowW >> 3));
+    /* Standard lores DDF for 320-wide window. */
+    ddfStrt = (UWORD)(((dpf->pView->ubPosX + 15) / 2) - 16);
+    ddfStop = (UWORD)(ddfStrt + ((windowW / 16) - 1) * 8);
+
+    /* 17 MOVEs total for the per-frame setup; the WAIT is part of
+     * copBlockCreate. Wait position: late horizontal blank on the line
+     * *before* the visible area starts — for 6 bitplanes ACE uses X=0xD9
+     * (see s_pCopperWaitXByBitplanes in ace/generic/screen.h). BPLCON0 is
+     * NOT in this block — it's set once directly to hardware in show(),
+     * because changing it mid-fetch on the first visible scanline corrupts
+     * bitplane interpretation. */
+    pCopList = dpf->pView->pCopList;
+    pBlock = copBlockCreate(pCopList, 17, 0xD9,
+                            dpf->pVPort->uwOffsY + dpf->pView->ubPosY - 1);
+    dpf->pCopBlock = pBlock;
+    if (!pBlock) return;
+
+    copMove(pCopList, pBlock, &g_pCustom->ddfstop, ddfStop);
+    copMove(pCopList, pBlock, &g_pCustom->ddfstrt, ddfStrt);
+    copMove(pCopList, pBlock, &g_pCustom->bpl1mod, modFg);
+    copMove(pCopList, pBlock, &g_pCustom->bpl2mod, modBg);
+    /* Then BPLCON1 + 6 BPL pointer pairs are written by
+     * _dpfWriteBitplanePtrs which rewinds to slot 4 and re-emits. */
+    _dpfWriteBitplanePtrs(dpf);
+
+    s_pActiveDualPlayfield = dpf;
+}
+
+void amipython_dual_playfield_show(AmipyDualPlayfield *dpf) {
+    if (!dpf || !dpf->pView) return;
+    /* Make sure palette.set calls made before show() have actually landed
+     * — they get buffered until a view is live. With dpf already in
+     * s_pActiveDualPlayfield, the active-view helpers see this vport. */
+    _flushPendingPalette(0);
+    viewLoad(dpf->pView);
+    /* viewLoad just wrote BPLCON0 = (BPP<<12)|COLOR — without DPF.
+     * Slam DPF on directly: the copBlock's BPLCON0 MOVE happens too late
+     * in the scanline (after DDFSTRT) so it doesn't affect bitplane
+     * interpretation cleanly mid-fetch; the synchronous write here flips
+     * DPF on before the next display field starts. */
+    g_pCustom->bplcon0 = (UWORD)((AMIPY_DPF_BPP << 12) | (1 << 10) | (1 << 9));
+    /* BPLCON2 default — PFA in front of PFB. */
+    g_pCustom->bplcon2 = 0;
+    systemUnuse();
+    /* Push the palette to hardware now so the first frame doesn't render
+     * with reg 0..15 still at zero. */
+    _palette_apply_fade();
+}
+
+void amipython_dual_playfield_scroll_fg(AmipyDualPlayfield *dpf,
+                                        LONG x, LONG y) {
+    if (!dpf || !dpf->pCopBlock) return;
+    dpf->scrollFgX = (WORD)x;
+    dpf->scrollFgY = (WORD)y;
+    _dpfWriteBitplanePtrs(dpf);
+}
+
+void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf,
+                                        LONG x, LONG y) {
+    if (!dpf || !dpf->pCopBlock) return;
+    dpf->scrollBgX = (WORD)x;
+    dpf->scrollBgY = (WORD)y;
+    _dpfWriteBitplanePtrs(dpf);
 }
 
 
@@ -1984,6 +2486,12 @@ LONG amipython_rnd(LONG n) {
     return (LONG)((s_seed >> 16) % (unsigned long)n);
 }
 
+LONG amipython_rnd_range(LONG lo, LONG hi) {
+    LONG span = hi - lo;
+    if (span <= 0) return lo;
+    return lo + amipython_rnd(span);
+}
+
 void amipython_shuffle(LONG *items, LONG count) {
     LONG i, j;
     LONG tmp;
@@ -2000,17 +2508,34 @@ void amipython_mouse_set_pointer(AmipySprite *sprite) {
 
 void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
     amipython_print_str("[sprite] grab\n");
-    (void)sprite; (void)bm; (void)x; (void)y; (void)w; (void)h;
+    sprite->width = (UWORD)w;
+    sprite->height = (UWORD)h;
+    sprite->bCollided = 0;
+    sprite->lastX = -1000;
+    sprite->lastY = -1000;
+    (void)bm; (void)x; (void)y;
 }
 
 void amipython_sprite_show(AmipySprite *sprite, LONG x, LONG y, LONG channel) {
     amipython_print_str("[sprite] show\n");
-    (void)sprite; (void)x; (void)y; (void)channel;
+    sprite->lastX = (WORD)x;
+    sprite->lastY = (WORD)y;
+    (void)channel;
 }
 
 BOOL amipython_sprite_collided(AmipySprite *sprite) {
     (void)sprite;
     return FALSE;
+}
+
+BOOL amipython_sprite_overlaps(AmipySprite *sprite, AmipySprite *other) {
+    WORD ax1 = sprite->lastX, ay1 = sprite->lastY;
+    WORD ax2 = ax1 + (WORD)sprite->width, ay2 = ay1 + (WORD)sprite->height;
+    WORD bx1 = other->lastX, by1 = other->lastY;
+    WORD bx2 = bx1 + (WORD)other->width, by2 = by1 + (WORD)other->height;
+    if (ax2 <= bx1 || bx2 <= ax1) return FALSE;
+    if (ay2 <= by1 || by2 <= ay1) return FALSE;
+    return TRUE;
 }
 
 void amipython_collision_register(LONG color, LONG mask) {
@@ -2097,6 +2622,40 @@ void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, L
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
     amipython_print_str("[display] sprites_behind\n");
     (void)d; (void)from_channel;
+}
+
+void amipython_copper_color_at(LONG scanline, LONG reg, LONG color) {
+    amipython_print_str("[copper] color_at ");
+    amipython_print_long(scanline);
+    amipython_print_str(" ");
+    amipython_print_long(reg);
+    amipython_print_str(" ");
+    amipython_print_long(color);
+    amipython_print_str("\n");
+}
+
+void amipython_dual_playfield_init(AmipyDualPlayfield *dpf, AmipyBitmap *fg, AmipyBitmap *bg) {
+    dpf->width = fg->width;
+    dpf->height = fg->height;
+    dpf->scrollFgX = 0; dpf->scrollFgY = 0;
+    dpf->scrollBgX = 0; dpf->scrollBgY = 0;
+    amipython_print_str("[dpf] init\n");
+    (void)bg;
+}
+
+void amipython_dual_playfield_show(AmipyDualPlayfield *dpf) {
+    amipython_print_str("[dpf] show\n");
+    (void)dpf;
+}
+
+void amipython_dual_playfield_scroll_fg(AmipyDualPlayfield *dpf, LONG x, LONG y) {
+    if (dpf) { dpf->scrollFgX = (WORD)x; dpf->scrollFgY = (WORD)y; }
+    amipython_print_str("[dpf] scroll_fg\n");
+}
+
+void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf, LONG x, LONG y) {
+    if (dpf) { dpf->scrollBgX = (WORD)x; dpf->scrollBgY = (WORD)y; }
+    amipython_print_str("[dpf] scroll_bg\n");
 }
 
 void amipython_sin_table(float *out, LONG n) {

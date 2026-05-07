@@ -25,6 +25,9 @@ for y in range(200, 256):
 # Set up a copper gradient on colour register 0 (background)
 # Top: dark blue (0,0,8) -> Middle: purple (8,0,8) -> Bottom: orange (15,8,0)
 for scanline in range(256):
+    r: int = 0
+    g: int = 0
+    b: int = 0
     if scanline < 128:
         # Blue to purple
         r = scanline // 16
@@ -32,14 +35,19 @@ for scanline in range(256):
         b = 8 + scanline // 32
     else:
         # Purple to orange
-        t = scanline - 128
+        t: int = scanline - 128
         r = 8 + t // 16
         g = t // 16
-        b = max(0, 8 - t // 16)
+        b = 8 - t // 16
+        if b < 0:
+            b = 0
 
-    r = min(r, 15)
-    g = min(g, 15)
-    b = min(b, 15)
+    if r > 15:
+        r = 15
+    if g > 15:
+        g = 15
+    if b > 15:
+        b = 15
     copper.color_at(scanline=scanline, register=0, color=Color(r, g, b))
 
 display.show(bm)

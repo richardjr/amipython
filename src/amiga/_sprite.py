@@ -18,6 +18,11 @@ class Sprite:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self._surface = surface
+        # Amiga hardware sprites treat colour 0 of their (4-colour) palette
+        # as transparent — match that in preview so the sprite cell's
+        # background pixels don't render as opaque black.
+        if surface.get_bitsize() == 8:
+            surface.set_colorkey(0)
         self.width = surface.get_width()
         self.height = surface.get_height()
         self._x = 0
@@ -47,3 +52,18 @@ class Sprite:
     def collided(self) -> bool:
         """Return True if collision was detected on last check()."""
         return self._collided_flag
+
+    def overlaps(self, other: Sprite) -> bool:
+        """AABB overlap test against another sprite based on last show() positions.
+
+        Touching edges count as separate (half-open intervals).
+        """
+        ax2 = self._x + self.width
+        ay2 = self._y + self.height
+        bx2 = other._x + other.width
+        by2 = other._y + other.height
+        if ax2 <= other._x or bx2 <= self._x:
+            return False
+        if ay2 <= other._y or by2 <= self._y:
+            return False
+        return True

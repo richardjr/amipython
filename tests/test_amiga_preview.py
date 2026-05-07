@@ -405,6 +405,147 @@ def test_storage_missing_int_list_returns_false(tmp_path, monkeypatch):
     assert existing == [1, 2, 3]   # unchanged
 
 
+def test_rnd_one_arg():
+    from amiga import rnd
+    for _ in range(50):
+        v = rnd(10)
+        assert 0 <= v < 10
+    # Zero / negative -> 0 (existing contract)
+    assert rnd(0) == 0
+    assert rnd(-5) == 0
+
+
+def test_rnd_range():
+    from amiga import rnd
+    for _ in range(50):
+        v = rnd(40, 180)
+        assert 40 <= v < 180
+    # Empty / inverted span -> lo
+    assert rnd(7, 7) == 7
+    assert rnd(10, 5) == 10
+
+
+def test_dual_playfield_composites_layers():
+    """Two source bitmaps should be visible in the composite — the BG paints
+    everywhere it's non-zero, and the FG layers over the top with colour 0
+    transparent."""
+    from amiga import Bitmap, DualPlayfield, palette
+    palette.set(0, 0, 0, 0)     # transparent for both PFs
+    palette.set(1, 15, 0, 0)    # FG: red
+    palette.set(8, 0, 0, 0)     # PFB transparent
+    palette.set(9, 0, 15, 0)    # BG: green
+    fg = Bitmap(64, 32, bitplanes=3)
+    bg = Bitmap(64, 32, bitplanes=3)
+    # Top half of FG is colour 1 (red); leaves bottom half transparent.
+    fg.box_filled(0, 0, 63, 15, 1)
+    # Whole BG is colour 9 (green band).
+    bg.box_filled(0, 0, 63, 31, 9)
+    dpf = DualPlayfield(fg, bg)
+    dpf.show()
+
+    composite = dpf._composite
+    # Top half: FG red wins over BG (FG colour 1 not transparent)
+    assert composite.get_at((10, 5))[:3] == (255, 0, 0)
+    # Bottom half: FG transparent, BG green shows through
+    assert composite.get_at((10, 25))[:3] == (0, 255, 0)
+
+
+def test_dual_playfield_scroll_independent():
+    """scroll_fg and scroll_bg move the layers independently."""
+    from amiga import Bitmap, DualPlayfield, palette
+    palette.set(0, 0, 0, 0)
+    palette.set(1, 15, 0, 0)
+    palette.set(9, 0, 15, 0)
+    fg = Bitmap(64, 32, bitplanes=3)
+    bg = Bitmap(64, 32, bitplanes=3)
+    fg.box_filled(0, 0, 31, 31, 1)   # left half red
+    bg.box_filled(32, 0, 63, 31, 9)  # right half green
+    dpf = DualPlayfield(fg, bg)
+    dpf.show()
+    # Default scroll: red on left, green on right.
+    assert dpf._composite.get_at((10, 16))[:3] == (255, 0, 0)
+    assert dpf._composite.get_at((50, 16))[:3] == (0, 255, 0)
+    # Shift FG left by 32 — right half should now be red (wrap), left half
+    # is colour 0 (transparent) so BG shows through (which is colour 0 there).
+    dpf.scroll_fg(32, 0)
+    assert dpf._composite.get_at((50, 16))[:3] == (255, 0, 0)
+
+
+def test_color_packs_ocs_word():
+    from amiga import Color
+    assert Color(0, 0, 0) == 0x000
+    assert Color(15, 15, 15) == 0xFFF
+    assert Color(8, 0, 8) == 0x808
+    # Out-of-range channels are masked, not rejected.
+    assert Color(0x1F, 0, 0) == 0xF00
+    assert Color(0, -1, 0) == 0x0F0  # -1 & 0xF == 0xF
+
+
+def test_copper_color_at_records_calls():
+    from amiga import copper, Color
+    from amiga._backend import Backend
+    backend = Backend.get()
+    copper.color_at(scanline=0,   register=0, color=Color(0, 0, 8))
+    copper.color_at(scanline=120, register=0, color=Color(8, 0, 8))
+    assert backend._copper_calls == [(0, 0, 0x008), (120, 0, 0x808)]
+
+
+def test_copper_render_applies_per_scanline_palette():
+    """Set up a flat-coloured screen and a copper split halfway down — the
+    rendered output should show two distinct colours above/below the split,
+    even though the source surface uses one palette index everywhere."""
+    import os
+    if os.environ.get("SDL_VIDEODRIVER") != "dummy":
+        # Skip in non-headless mode to avoid surprising the user with a window.
+        pass
+    import pygame
+    from amiga import Display, Bitmap, palette, copper, Color
+    from amiga._backend import Backend
+
+    palette.set(0, 0, 0, 8)        # blue at the top
+    palette.set(1, 15, 15, 15)     # white (unused; just so we have a 2-colour display)
+    display = Display(160, 100, bitplanes=1)
+    bm = Bitmap(160, 100, bitplanes=1)
+    display.show(bm)
+    bm.clear()
+
+    copper.color_at(scanline=50, register=0, color=Color(15, 0, 0))  # red below
+
+    rendered = Backend.get()._render_with_copper(bm._surface)
+    # Top row should be blue-ish, bottom row red-ish.
+    top = rendered.get_at((10, 10))[:3]
+    bot = rendered.get_at((10, 80))[:3]
+    assert top[2] > top[0]   # blue dominates above the split
+    assert bot[0] > bot[2]   # red dominates below the split
+
+
+def test_sprite_overlaps_aabb():
+    from amiga import Bitmap, Sprite, palette
+    palette.set(1, 15, 15, 15)
+    bm = Bitmap(64, 64, bitplanes=3)
+    bm.box_filled(0, 0, 15, 15, 1)
+    a = Sprite.grab(bm, 0, 0, 16, 16)
+    b = Sprite.grab(bm, 0, 0, 16, 16)
+
+    a.show(0, 0, channel=0)
+    b.show(8, 8, channel=1)
+    assert a.overlaps(b) is True
+    assert b.overlaps(a) is True
+
+    # Touching edges — half-open: not overlapping
+    a.show(0, 0, channel=0)
+    b.show(16, 0, channel=1)
+    assert a.overlaps(b) is False
+
+    # Far apart
+    b.show(100, 100, channel=1)
+    assert a.overlaps(b) is False
+
+    # Identical position — overlapping
+    b.show(0, 0, channel=1)
+    assert a.overlaps(b) is True
+
+
 def test_print_centered_positions_correctly():
     from amiga import Bitmap, palette
     palette.set(1, 15, 15, 15)

@@ -556,6 +556,15 @@ class _TypeChecker(ast.NodeVisitor):
                         lineno=node.lineno,
                     )
                 return AmipyType.STR
+            if name == "Color" and name in self.info.engine_imports:
+                if len(node.args) != 3:
+                    raise TypeCheckError(
+                        "Color() takes exactly 3 arguments (r, g, b)",
+                        lineno=node.lineno,
+                    )
+                for arg in node.args:
+                    self._infer(arg)
+                return AmipyType.INT
             if name == "abs":
                 if len(node.args) == 1:
                     return self._infer(node.args[0])
@@ -588,6 +597,15 @@ class _TypeChecker(ast.NodeVisitor):
                 for arg in node.args:
                     self._infer(arg)
                 return AmipyType.LIST
+            # rnd(n) — random 0..n-1; rnd(lo, hi) — random lo..hi-1
+            if name == "rnd" and name in self.info.engine_imports:
+                if len(node.args) not in (1, 2):
+                    raise TypeCheckError(
+                        "'rnd()' expects 1 or 2 arguments", lineno=node.lineno
+                    )
+                for arg in node.args:
+                    self._infer(arg)
+                return AmipyType.INT
             # Engine builtin: wait_mouse(), vwait(), rnd()
             if name in BUILTINS and name in self.info.engine_imports:
                 builtin = BUILTINS[name]

@@ -15,6 +15,7 @@ class AmipyType(Enum):
     SHAPE = auto()
     SPRITE = auto()
     TILEMAP = auto()
+    DUAL_PLAYFIELD = auto()
     MODULE = auto()  # engine module (palette, copper, etc.)
     STRUCT = auto()
     LIST = auto()
@@ -40,6 +41,7 @@ C_TYPE_MAP: dict[AmipyType, str] = {
     AmipyType.SHAPE: "AmipyShape",
     AmipyType.SPRITE: "AmipySprite",
     AmipyType.TILEMAP: "AmipyTilemap",
+    AmipyType.DUAL_PLAYFIELD: "AmipyDualPlayfield",
 }
 
 # Map engine Python type names to AmipyType
@@ -49,6 +51,7 @@ ENGINE_TYPE_MAP: dict[str, AmipyType] = {
     "Shape": AmipyType.SHAPE,
     "Sprite": AmipyType.SPRITE,
     "Tilemap": AmipyType.TILEMAP,
+    "DualPlayfield": AmipyType.DUAL_PLAYFIELD,
 }
 
 # printf format specifiers for each type
