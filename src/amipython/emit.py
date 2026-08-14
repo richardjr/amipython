@@ -46,6 +46,7 @@ class _Emitter:
         self.source_dir = source_dir  # directory of the .py source file
         self._embedded_counter = 0  # counter for unique embedded data names
         self._embedded_decls: list[str] = []  # top-level embedded data arrays
+        self._current_function: str | None = None  # scope for _get_var_info
 
     def _embed_shape(self, path_literal: str, var_name: str) -> str | None:
         """Convert a PNG/IFF at transpile time and return embedded load call.
@@ -580,10 +581,16 @@ class _Emitter:
         elif var.is_ref and self._is_engine_object_type(var.type):
             c_type = C_TYPE_MAP[var.type]
             self._line(f"{c_type} *{name};")
+        elif self._is_engine_object_type(var.type):
+            # Zero-init engine objects on the stack — the runtime's re-grab /
+            # re-load paths inspect previous pointers (globals are already
+            # zero-initialised by C).
+            self._line(f"{C_TYPE_MAP[var.type]} {name} = {{0}};")
         else:
             self._line(f"{self._var_decl(var.type, name)};")
 
     def _emit_function(self, node: ast.FunctionDef):
+        self._current_function = node.name
         func = self.info.functions[node.name]
         params = ", ".join(
             self._var_decl(p.type, p.name) for p in func.params
@@ -618,22 +625,28 @@ class _Emitter:
         self.indent -= 1
         self._line("}")
         self._line()
+        self._current_function = None
 
     def _collect_for_idx_vars(self, stmts: list, out: set):
         """Collect _idx variable names needed for list iteration loops."""
         for stmt in stmts:
-            if isinstance(stmt, ast.For) and isinstance(stmt.iter, ast.Name):
-                # for x in list_var -> x_idx
-                list_var = self._get_var_info(stmt.iter.id)
-                if list_var and list_var.type == AmipyType.LIST:
-                    if isinstance(stmt.target, ast.Name):
-                        out.add(f"{stmt.target.id}_idx")
+            if isinstance(stmt, ast.For):
+                # for x in list_var -> x_idx (range() loops need no idx var,
+                # but their bodies can still contain list loops — recurse
+                # into every For regardless of what it iterates)
+                if isinstance(stmt.iter, ast.Name):
+                    list_var = self._get_var_info(stmt.iter.id)
+                    if list_var and list_var.type == AmipyType.LIST:
+                        if isinstance(stmt.target, ast.Name):
+                            out.add(f"{stmt.target.id}_idx")
                 self._collect_for_idx_vars(stmt.body, out)
+                self._collect_for_idx_vars(stmt.orelse, out)
             elif isinstance(stmt, ast.If):
                 self._collect_for_idx_vars(stmt.body, out)
                 self._collect_for_idx_vars(stmt.orelse, out)
             elif isinstance(stmt, ast.While):
                 self._collect_for_idx_vars(stmt.body, out)
+                self._collect_for_idx_vars(stmt.orelse, out)
 
     def _emit_main(self, tree: ast.Module):
         """Emit the main function from module-level statements."""
@@ -752,7 +765,7 @@ class _Emitter:
                     elif method_name == "load":
                         args_strs = [_rewrite_asset_path(s) for s in args_strs]
                     # Resolve keyword args for static methods
-                    if hasattr(static, 'keywords') and static.keywords:
+                    if static.keywords:
                         kw_provided = {kw.arg: self._emit_arg(kw.value)
                                        for kw in node.value.keywords}
                         for kw_name, (kw_type, kw_default) in static.keywords.items():
@@ -760,6 +773,12 @@ class _Emitter:
                                 args_strs.append(kw_provided[kw_name])
                             elif kw_default is not None:
                                 args_strs.append(str(kw_default))
+                            else:
+                                raise EmitError(
+                                    f"missing required keyword argument "
+                                    f"'{kw_name}' for {static.c_name}",
+                                    lineno=node.lineno,
+                                )
                     args = ", ".join(args_strs)
                     if args:
                         self._line(f"{static.c_name}(&{target.id}, {args});")
@@ -801,8 +820,12 @@ class _Emitter:
                 if var and var.type == AmipyType.LIST:
                     self._line(f"{node.target.id}_count = 0;")
                 return
-            val = self._emit_expr(node.value)
-            self._line(f"{node.target.id} = {val};")
+            # Delegate to the plain-assign path so annotated assignments get
+            # the same engine-constructor / static-method / struct / trig
+            # dispatch as `x = ...`.
+            synth = ast.Assign(targets=[node.target], value=node.value)
+            ast.copy_location(synth, node)
+            self._emit_assign(synth)
 
     def _emit_aug_assign(self, node: ast.AugAssign):
         if isinstance(node.target, ast.Attribute):
@@ -1005,7 +1028,15 @@ class _Emitter:
                     args_strs.append(kw_provided[kw_name])
                 elif kw_default is not None:
                     args_strs.append(str(kw_default))
-                # else: required kwarg — type checker ensures it's provided
+                else:
+                    # Required kwarg (default None). The type checker rejects
+                    # this earlier; this backstop prevents silently emitting a
+                    # call with the remaining args shifted into wrong slots.
+                    raise EmitError(
+                        f"missing required keyword argument '{kw_name}' "
+                        f"for {method.c_name}",
+                        lineno=call.lineno,
+                    )
         return args_strs
 
     def _emit_method_call_stmt(self, call: ast.Call):
@@ -1033,21 +1064,39 @@ class _Emitter:
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
-            # Intercept music.load() — embed MOD at transpile time
+            # Intercept music.load() — embed MOD at transpile time. The
+            # Amiga runtime cannot load a MOD from disk (the path-based
+            # amipython_music_load is a no-op there), so failing to embed
+            # is a transpile error, not a fallthrough.
             if obj_name == "music" and method_name == "load" and call.args:
                 path_str = self._emit_arg(call.args[0])
                 embedded = self._embed_music(path_str)
-                if embedded:
-                    self._line(embedded)
-                    return
-            # Intercept sfx.load(slot, path) — embed WAV at transpile time
+                if not embedded:
+                    raise EmitError(
+                        f"music.load: could not embed {path_str} — the path "
+                        f"must be a string literal resolving to a file next "
+                        f"to the source (Amiga runtime has no disk loading "
+                        f"for MODs)",
+                        lineno=call.lineno,
+                    )
+                self._line(embedded)
+                return
+            # Intercept sfx.load(slot, path) — embed WAV at transpile time.
+            # Same contract as music.load: no disk loading on Amiga.
             if obj_name == "sfx" and method_name == "load" and len(call.args) == 2:
                 slot_expr = self._emit_expr(call.args[0])
                 path_str = self._emit_arg(call.args[1])
                 embedded = self._embed_sfx(slot_expr, path_str)
-                if embedded:
-                    self._line(embedded)
-                    return
+                if not embedded:
+                    raise EmitError(
+                        f"sfx.load: could not embed {path_str} — the path "
+                        f"must be a string literal resolving to an 8-bit "
+                        f"mono WAV next to the source (Amiga runtime has no "
+                        f"disk loading for samples)",
+                        lineno=call.lineno,
+                    )
+                self._line(embedded)
+                return
             # Storage methods that accept a list arg need <list>_items expansion.
             if obj_name == "storage" and method_name in (
                 "save_int_list", "load_int_list",
@@ -1680,17 +1729,21 @@ class _Emitter:
         return f"{method.c_name}(&{obj_name})"
 
     def _get_var_info(self, name: str) -> VariableInfo | None:
-        # Check all local scopes then globals
-        for locals_dict in self.info.locals.values():
-            if name in locals_dict:
-                return locals_dict[name]
+        # Current function scope first (params + locals), then globals.
+        # Never look inside other functions' scopes — the same name can
+        # have a different type/is_ref there.
+        if self._current_function is not None:
+            local = self.info.locals.get(self._current_function, {}).get(name)
+            if local is not None:
+                return local
         if name in self.info.globals:
             return self.info.globals[name]
         return None
 
     def _is_engine_object_type(self, t: AmipyType) -> bool:
         return t in (AmipyType.DISPLAY, AmipyType.BITMAP, AmipyType.SHAPE,
-                     AmipyType.SPRITE, AmipyType.TILEMAP)
+                     AmipyType.SPRITE, AmipyType.TILEMAP,
+                     AmipyType.DUAL_PLAYFIELD)
 
     def _emit_run(self, call: ast.Call):
         """Emit run(update, until=lambda: expr) as a game loop."""

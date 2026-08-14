@@ -254,3 +254,34 @@ class TestList:
     def test_list_subscript_assign_non_int_index(self):
         with pytest.raises(TypeCheckError):
             _typecheck('nums: list[int] = []\nnums.append(1)\nnums[1.5] = 42\n')
+
+
+class TestEngineCallErrors:
+    def test_missing_required_kwarg_rejected(self):
+        with pytest.raises(TypeCheckError, match="missing required keyword"):
+            _typecheck(
+                "from amiga import Display, copper, Color\n"
+                "copper.color_at(color=Color(15, 0, 0))\n"
+            )
+
+    def test_all_required_kwargs_accepted(self):
+        _typecheck(
+            "from amiga import Display, copper, Color\n"
+            "copper.color_at(scanline=10, register=0, color=Color(15, 0, 0))\n"
+        )
+
+    def test_direct_shape_construction_rejected(self):
+        with pytest.raises(TypeCheckError, match="cannot be constructed directly"):
+            _typecheck("from amiga import Display, Shape\ns = Shape()\n")
+
+    def test_direct_sprite_construction_rejected(self):
+        with pytest.raises(TypeCheckError, match="cannot be constructed directly"):
+            _typecheck("from amiga import Display, Sprite\ns = Sprite()\n")
+
+    def test_list_parameter_rejected(self):
+        with pytest.raises(TypeCheckError, match="list parameters are not supported"):
+            _typecheck("def f(xs: list[int]) -> int:\n    return 0\n")
+
+    def test_none_return_annotation_accepted(self):
+        info = _typecheck("def f() -> None:\n    pass\n")
+        assert info.functions["f"].return_type == AmipyType.VOID

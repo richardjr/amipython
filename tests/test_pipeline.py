@@ -25,3 +25,26 @@ def test_golden_file(name: str):
         f"--- expected ---\n{expected}\n"
         f"--- actual ---\n{actual}"
     )
+
+
+def test_music_load_missing_file_is_transpile_error():
+    # The Amiga runtime cannot load a MOD from disk, so a music.load that
+    # can't be embedded at transpile time must fail loudly, not fall back
+    # to a call that is a silent no-op on hardware.
+    import pytest
+    from amipython.errors import EmitError
+    with pytest.raises(EmitError, match="could not embed"):
+        transpile(
+            "from amiga import Display, music\n"
+            'music.load("data/definitely_missing.mod")\n'
+        )
+
+
+def test_sfx_load_missing_file_is_transpile_error():
+    import pytest
+    from amipython.errors import EmitError
+    with pytest.raises(EmitError, match="could not embed"):
+        transpile(
+            "from amiga import Display, sfx\n"
+            'sfx.load(0, "data/definitely_missing.wav")\n'
+        )

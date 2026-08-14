@@ -375,6 +375,9 @@ music.volume(48)               # 0-64, default 64
 ```
 
 - MOD file is embedded in the binary at transpile time (same approach as images)
+- The path must be a string literal resolving to a file next to the source —
+  a file that can't be found at transpile time is a transpile error (the
+  Amiga runtime has no disk loading for MODs)
 - On Amiga: uses ACE's ptplayer (CIA-B interrupt timing, runs autonomously)
 - In Python preview: uses pygame.mixer for MOD playback
 - No per-frame calls needed — music plays via interrupt

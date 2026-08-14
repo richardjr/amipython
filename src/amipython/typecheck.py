@@ -37,6 +37,9 @@ def _resolve_annotation(
 
     Returns (type, struct_name, list_element_type, list_element_struct).
     """
+    if isinstance(node, ast.Constant) and node.value is None:
+        # `-> None` return annotation
+        return AmipyType.VOID, None, None, None
     if isinstance(node, ast.Name):
         if node.id in ANNOTATION_MAP:
             return ANNOTATION_MAP[node.id], None, None, None
@@ -125,6 +128,12 @@ def _collect_function(node: ast.FunctionDef, info: TypeInfo):
         param_type, struct_name, _, _ = _resolve_annotation(
             arg.annotation, lineno=node.lineno, structs=info.structs
         )
+        if param_type == AmipyType.LIST:
+            raise TypeCheckError(
+                f"parameter '{arg.arg}': list parameters are not supported — "
+                f"use a global list instead",
+                lineno=node.lineno,
+            )
         params.append(VariableInfo(arg.arg, param_type, struct_name=struct_name))
 
     return_type = AmipyType.VOID
@@ -648,6 +657,14 @@ class _TypeChecker(ast.NodeVisitor):
     def _infer_engine_constructor(self, node: ast.Call, name: str) -> AmipyType:
         obj_type = OBJECT_TYPES[name]
         ctor = obj_type.constructor
+        if ctor is None:
+            statics = ", ".join(
+                f"{name}.{m}(...)" for m in obj_type.static_methods
+            ) or "a static method"
+            raise TypeCheckError(
+                f"'{name}' cannot be constructed directly — use {statics}",
+                lineno=node.lineno,
+            )
         expected_pos = len(ctor.positional)
         if len(node.args) != expected_pos:
             raise TypeCheckError(
@@ -875,6 +892,17 @@ class _TypeChecker(ast.NodeVisitor):
                         lineno=node.lineno,
                     )
                 self._infer(kw.value)
+            # Kwargs with a None default are required — the C function takes
+            # a fixed argument list, so omitting one would shift the
+            # remaining args into the wrong parameter slots.
+            provided = {kw.arg for kw in node.keywords}
+            for kw_name, (_kw_type, kw_default) in method.keywords.items():
+                if kw_default is None and kw_name not in provided:
+                    raise TypeCheckError(
+                        f"'{label}()' missing required keyword argument "
+                        f"'{kw_name}'",
+                        lineno=node.lineno,
+                    )
 
     def _infer_list_method(
         self, node: ast.Call, list_var: VariableInfo, method_name: str

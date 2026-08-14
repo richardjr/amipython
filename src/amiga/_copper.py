@@ -18,6 +18,12 @@ from amiga._backend import Backend
 
 class _CopperModule:
     def color_at(self, *, scanline: int, register: int, color: int) -> None:
+        # Mirror the C runtime's guards: only colour registers 0..31 exist
+        # on OCS, and scanlines outside 0..255 never fire.
+        if not (0 <= int(register) <= 31):
+            return
+        if not (0 <= int(scanline) <= 255):
+            return
         backend = Backend.get()
         backend._copper_calls.append(
             (int(scanline), int(register), int(color) & 0xFFF)

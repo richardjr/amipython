@@ -39,6 +39,10 @@
 #define AMIPY_SPRITE_CHANNELS 8
 static AmipySprite *s_apSpritesByChannel[AMIPY_SPRITE_CHANNELS] = {0};
 static UBYTE s_bSpriteManagerActive = 0;
+/* Tracks ACE's systemUnuse/systemUse pairing — show() may be called more
+ * than once (or by more than one display kind), but the OS must be taken
+ * over exactly once and given back exactly once. */
+static UBYTE s_bSystemUnused = 0;
 
 /* Copper-driven per-scanline colour overrides. Buffered until display.show
  * has loaded a view; then each entry becomes a 1-MOVE copBlock that fires
@@ -119,6 +123,10 @@ static void _destroyCopperBlocks(void) {
 
 void amipython_copper_color_at(LONG scanline, LONG reg, LONG color) {
     AmipyCopperEntry *e;
+    /* Only colour registers 0..31 exist (0xDFF180..0xDFF1BE) — anything
+     * else would MOVE into unrelated custom registers. */
+    if (reg < 0 || reg > 31) return;
+    if (scanline < 0 || scanline > 255) return;
     if (s_uCopperCount >= AMIPY_COPPER_MAX) return;
     e = &s_aCopper[s_uCopperCount];
     e->scanline = (UWORD)scanline;
@@ -155,9 +163,19 @@ void amipython_engine_destroy(void) {
         for (_i = 0; _i < AMIPYTHON_SFX_SLOTS; ++_i) _sfx_free_slot(_i);
     }
     ptplayerDestroy();
-    if (s_pActiveTilemap && s_pActiveTilemap->pView) {
+    /* Give the hardware back to the OS once, then tear down every display
+     * kind that was created — independent ifs, not else-if: a program can
+     * legitimately have created more than one over its lifetime. */
+    if ((s_pActiveTilemap && s_pActiveTilemap->pView)
+            || (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pView)
+            || (s_pActiveDisplay && s_pActiveDisplay->pView)) {
         viewLoad(0);
-        systemUse();
+        if (s_bSystemUnused) {
+            systemUse();
+            s_bSystemUnused = 0;
+        }
+    }
+    if (s_pActiveTilemap && s_pActiveTilemap->pView) {
         if (s_pActiveTilemap->pTilesetBitmap) {
             bitmapDestroy(s_pActiveTilemap->pTilesetBitmap);
             s_pActiveTilemap->pTilesetBitmap = 0;
@@ -166,9 +184,8 @@ void amipython_engine_destroy(void) {
         s_pActiveTilemap->pView = 0;
         s_pActiveTilemap->pVPort = 0;
         s_pActiveTilemap->pTileBfr = 0;
-    } else if (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pView) {
-        viewLoad(0);
-        systemUse();
+    }
+    if (s_pActiveDualPlayfield && s_pActiveDualPlayfield->pView) {
         if (s_pActiveDualPlayfield->pCopBlock) {
             copBlockDestroy(s_pActiveDualPlayfield->pView->pCopList,
                             (tCopBlock *)s_pActiveDualPlayfield->pCopBlock);
@@ -177,10 +194,11 @@ void amipython_engine_destroy(void) {
         viewDestroy(s_pActiveDualPlayfield->pView);
         s_pActiveDualPlayfield->pView = 0;
         s_pActiveDualPlayfield->pVPort = 0;
-    } else if (s_pActiveDisplay && s_pActiveDisplay->pView) {
+    }
+    if (s_pActiveDisplay && s_pActiveDisplay->pView) {
         /* Free copper blocks before tearing down the view. */
         _destroyCopperBlocks();
-        /* Tear sprites down before viewLoad(0); spriteManagerDestroy walks
+        /* Tear sprites down before viewDestroy; spriteManagerDestroy walks
          * the per-channel chains so we have to remove our sprites first. */
         if (s_bSpriteManagerActive) {
             LONG ch;
@@ -196,8 +214,6 @@ void amipython_engine_destroy(void) {
             spriteManagerDestroy();
             s_bSpriteManagerActive = 0;
         }
-        viewLoad(0);
-        systemUse();
         /* User bitmap was redirected to pBfr->pBack in display_show.
          * viewDestroy destroys pBfr->pBack, so null out user ptr to avoid double-free. */
         if (s_pActiveBitmap) {
@@ -208,6 +224,10 @@ void amipython_engine_destroy(void) {
         s_pActiveDisplay->pVPort = 0;
         s_pActiveDisplay->pBfr = 0;
     }
+    s_pActiveTilemap = 0;
+    s_pActiveDualPlayfield = 0;
+    s_pActiveDisplay = 0;
+    s_pActiveBitmap = 0;
     keyDestroy();
     joyClose();
     mouseDestroy();
@@ -299,8 +319,12 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
 
     /* Redirect user bitmap to display buffer.
      * Use blitCopy (not CopyMem) — handles different bitmap formats
-     * (e.g. interleaved SimpleBuffer vs non-interleaved user bitmap). */
-    if (bm->pBitmap && d->pBfr && d->pBfr->pBack) {
+     * (e.g. interleaved SimpleBuffer vs non-interleaved user bitmap).
+     * Guard against a repeated show(): once redirected, bm->pBitmap IS
+     * pBfr->pBack — redoing the copy would blit pBack onto itself and then
+     * destroy the live framebuffer. */
+    if (bm->pBitmap && d->pBfr && d->pBfr->pBack
+            && bm->pBitmap != d->pBfr->pBack) {
         tBitMap *pOldBm = bm->pBitmap;
         blitWait();
         blitCopy(
@@ -316,9 +340,13 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
         bitmapDestroy(pOldBm);
     }
 
-    /* Load view + take over hardware */
+    /* Load view + take over hardware (once — systemUnuse must stay balanced
+     * with the single systemUse in engine_destroy) */
     viewLoad(d->pView);
-    systemUnuse();
+    if (!s_bSystemUnused) {
+        systemUnuse();
+        s_bSystemUnused = 1;
+    }
 
     /* Spin up the sprite manager once the view is live. systemSetDmaBit
      * enables sprite DMA; spriteManagerCreate hooks in 16 copper commands
@@ -435,13 +463,20 @@ void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, L
 }
 
 void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color) {
-    if (bm->pBitmap && x1 <= x2 && y1 <= y2) {
-        UWORD bw = (UWORD)(x2 - x1 + 1);
-        UWORD bh = (UWORD)(y2 - y1 + 1);
-        _dirtyExpand(bm, (WORD)x1, (WORD)y1, (WORD)x2, (WORD)y2);
-        blitWait();
-        blitRect(bm->pBitmap, (UWORD)x1, (UWORD)y1, bw, bh, (UBYTE)color);
-    }
+    LONG bw, bh;
+    if (!bm->pBitmap || x1 > x2 || y1 > y2) return;
+    /* Clip to the bitmap — a negative coordinate cast to UWORD would wrap
+     * to ~65535 and blit outside the allocation. */
+    bw = (LONG)bm->width; bh = (LONG)bm->height;
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 >= bw) x2 = bw - 1;
+    if (y2 >= bh) y2 = bh - 1;
+    if (x1 > x2 || y1 > y2) return;
+    _dirtyExpand(bm, (WORD)x1, (WORD)y1, (WORD)x2, (WORD)y2);
+    blitWait();
+    blitRect(bm->pBitmap, (UWORD)x1, (UWORD)y1,
+             (UWORD)(x2 - x1 + 1), (UWORD)(y2 - y1 + 1), (UBYTE)color);
 }
 
 void amipython_bitmap_clear(AmipyBitmap *bm) {
@@ -676,14 +711,41 @@ static UWORD *_generateShapeMask(tBitMap *pBm, UWORD w, UWORD h, UBYTE bp) {
     return pMask;
 }
 
+/* Free a shape's chip-RAM data (bitmap + mask) so re-grab / re-load
+ * doesn't leak. Mask size mirrors the _generateShapeMask allocation. */
+static void _freeShapeData(AmipyShape *shape) {
+    if (shape->pMask) {
+        ULONG maskBytes = ((ULONG)(shape->width / 16)) * (ULONG)shape->height * 2;
+        if (maskBytes) {
+            memFree(shape->pMask, maskBytes);
+        }
+        shape->pMask = 0;
+    }
+    if (shape->pBitmap) {
+        blitWait();
+        bitmapDestroy(shape->pBitmap);
+        shape->pBitmap = 0;
+    }
+}
+
 void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
     /* Round width up to next multiple of 16 — blitter operates on words */
-    UWORD uw = (UWORD)((w + 15) & ~15);
-    UWORD uh = (UWORD)h;
+    UWORD uw, uh;
+    LONG bw = (LONG)bm->width, bh = (LONG)bm->height;
+    _freeShapeData(shape);
+    shape->width = 0;
+    shape->height = 0;
+    shape->bitplanes = bm->bitplanes;
+    if (w <= 0 || h <= 0 || x < 0 || y < 0 || x >= bw || y >= bh) return;
+    uw = (UWORD)((w + 15) & ~15);
+    uh = (UWORD)h;
+    /* Clamp so the (word-aligned) grab never reads past the source bitmap —
+     * width rounding can push the rect past the right edge. */
+    if ((LONG)uw > bw - x) uw = (UWORD)((bw - x) & ~15);
+    if ((LONG)uh > bh - y) uh = (UWORD)(bh - y);
+    if (uw == 0 || uh == 0) return;
     shape->width = uw;
     shape->height = uh;
-    shape->bitplanes = bm->bitplanes;
-    shape->pMask = 0;
     shape->pBitmap = bitmapCreate(uw, uh, bm->bitplanes, BMF_CLEAR);
     if (shape->pBitmap && bm->pBitmap) {
         blitWait();
@@ -707,6 +769,11 @@ static tBitMap *_loadBitmapAsset(const char *path) {
     tBitMap *pBm;
     const char *src;
     char *dst;
+    LONG len = 0;
+
+    /* Path must fit s_pathBuf with the longest prefix ("PROGDIR:") + NUL. */
+    for (src = path; *src; src++) len++;
+    if (len > (LONG)sizeof(s_pathBuf) - 9) return 0;
 
     /* Try raw path first (works when CD is set correctly) */
     pBm = bitmapCreateFromPath(path, 0);
@@ -730,14 +797,13 @@ static tBitMap *_loadBitmapAsset(const char *path) {
 
 void amipython_shape_load(AmipyShape *shape, const char *path) {
     tBitMap *pBm = _loadBitmapAsset(path);
-    shape->pMask = 0;
-    if (pBm) {
-        shape->width = bitmapGetByteWidth(pBm) * 8;
-        shape->height = pBm->Rows;
-        shape->bitplanes = pBm->Depth;
-        shape->pBitmap = pBm;
-        shape->pMask = _generateShapeMask(pBm, shape->width, shape->height, pBm->Depth);
-    }
+    if (!pBm) return;  /* keep any previous contents intact on failure */
+    _freeShapeData(shape);
+    shape->width = bitmapGetByteWidth(pBm) * 8;
+    shape->height = pBm->Rows;
+    shape->bitplanes = pBm->Depth;
+    shape->pBitmap = pBm;
+    shape->pMask = _generateShapeMask(pBm, shape->width, shape->height, pBm->Depth);
 }
 
 void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w, LONG h, LONG bp) {
@@ -745,28 +811,43 @@ void amipython_shape_load_embedded(AmipyShape *shape, const UBYTE *data, LONG w,
     UWORD bytesPerRow = (UWORD)(w / 8);
     ULONG planeSize = (ULONG)bytesPerRow * (ULONG)h;
     tBitMap *pBm = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, 0);
-    shape->pMask = 0;
-    if (pBm) {
-        for (i = 0; i < (UBYTE)bp; i++) {
-            CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
-        }
-        shape->width = (UWORD)w;
-        shape->height = (UWORD)h;
-        shape->bitplanes = (UBYTE)bp;
-        shape->pBitmap = pBm;
-        shape->pMask = _generateShapeMask(pBm, (UWORD)w, (UWORD)h, (UBYTE)bp);
+    if (!pBm) return;
+    _freeShapeData(shape);
+    for (i = 0; i < (UBYTE)bp; i++) {
+        CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
     }
+    shape->width = (UWORD)w;
+    shape->height = (UWORD)h;
+    shape->bitplanes = (UBYTE)bp;
+    shape->pBitmap = pBm;
+    shape->pMask = _generateShapeMask(pBm, (UWORD)w, (UWORD)h, (UBYTE)bp);
+}
+
+/* Free a user bitmap's tBitMap on re-load. Never destroys the display's
+ * framebuffer — display_show redirects the shown bitmap's pointer at
+ * pBfr->pBack, which viewDestroy owns. */
+static void _freeUserBitmap(AmipyBitmap *bm) {
+    if (!bm->pBitmap) return;
+    if (s_pActiveDisplay && s_pActiveDisplay->pBfr
+            && (bm->pBitmap == s_pActiveDisplay->pBfr->pBack
+                || bm->pBitmap == s_pActiveDisplay->pBfr->pFront)) {
+        bm->pBitmap = 0;
+        return;
+    }
+    blitWait();
+    bitmapDestroy(bm->pBitmap);
+    bm->pBitmap = 0;
 }
 
 void amipython_bitmap_load(AmipyBitmap *bm, const char *path) {
     tBitMap *pBm = _loadBitmapAsset(path);
-    if (pBm) {
-        bm->width = bitmapGetByteWidth(pBm) * 8;
-        bm->height = pBm->Rows;
-        bm->bitplanes = pBm->Depth;
-        bm->pBitmap = pBm;
-        _dirtyReset(bm);
-    }
+    if (!pBm) return;  /* keep any previous contents intact on failure */
+    _freeUserBitmap(bm);
+    bm->width = bitmapGetByteWidth(pBm) * 8;
+    bm->height = pBm->Rows;
+    bm->bitplanes = pBm->Depth;
+    bm->pBitmap = pBm;
+    _dirtyReset(bm);
 }
 
 void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, LONG h, LONG bp) {
@@ -774,16 +855,16 @@ void amipython_bitmap_load_embedded(AmipyBitmap *bm, const UBYTE *data, LONG w, 
     UWORD bytesPerRow = (UWORD)(w / 8);
     ULONG planeSize = (ULONG)bytesPerRow * (ULONG)h;
     tBitMap *pBm = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, 0);
-    if (pBm) {
-        for (i = 0; i < (UBYTE)bp; i++) {
-            CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
-        }
-        bm->width = (UWORD)w;
-        bm->height = (UWORD)h;
-        bm->bitplanes = (UBYTE)bp;
-        bm->pBitmap = pBm;
-        _dirtyReset(bm);
+    if (!pBm) return;
+    _freeUserBitmap(bm);
+    for (i = 0; i < (UBYTE)bp; i++) {
+        CopyMem((APTR)(data + (ULONG)i * planeSize), pBm->Planes[i], planeSize);
     }
+    bm->width = (UWORD)w;
+    bm->height = (UWORD)h;
+    bm->bitplanes = (UBYTE)bp;
+    bm->pBitmap = pBm;
+    _dirtyReset(bm);
 }
 
 static UWORD s_uwJoyIgnoreCount = 10;  /* ignore first 10 frames (Amiberry LMB quirk) */
@@ -835,6 +916,15 @@ void amipython_mouse_set_pointer(AmipySprite *sprite) {
 void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y, LONG w, LONG h) {
     UWORD uw = (UWORD)((w + 15) & ~15);
     UWORD uh = (UWORD)h;
+    /* Re-grab: free the previous sprite bitmap so animation-by-regrab
+     * doesn't leak chip RAM. Skipped while the sprite is attached to a
+     * channel (the channel's copper block still points at the old bitmap;
+     * detach by re-showing on a channel change before re-grabbing). */
+    if (sprite->pBitmap && !sprite->pAceSprite) {
+        blitWait();
+        bitmapDestroy(sprite->pBitmap);
+        sprite->pBitmap = 0;
+    }
     sprite->width = uw;
     sprite->height = uh;
     sprite->bitplanes = 2;            /* hardware sprites are always 2BPP */
@@ -864,8 +954,10 @@ void amipython_sprite_grab(AmipySprite *sprite, AmipyBitmap *bm, LONG x, LONG y,
             UBYTE *pDst = (UBYTE *)sprite->pBitmap->Planes[plane];
             if (!pSrc || !pDst) continue;
             for (row = 0; row < uh; row++) {
-                UWORD srcOff = (UWORD)((UWORD)y + row) * srcStride + srcXBytes;
-                UWORD dstOff = (UWORD)(row + 1) * dstStride;  /* +1 skips header row */
+                /* ULONG offsets — a UWORD product overflows for grabs low
+                 * down in a tall source bitmap (y*stride > 65535). */
+                ULONG srcOff = (ULONG)((ULONG)y + row) * srcStride + srcXBytes;
+                ULONG dstOff = (ULONG)(row + 1) * dstStride;  /* +1 skips header row */
                 pDst[dstOff]     = pSrc[srcOff];
                 pDst[dstOff + 1] = pSrc[srcOff + 1];
             }
@@ -1092,15 +1184,27 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
     LONG cx = x;
     LONG bw = (LONG)bm->width, bh = (LONG)bm->height;
     LONG textLen = 0;
+    LONG ex, ey, ew, eh;
     const char *p;
     if (!bm->pBitmap || !text) return;
     for (p = text; *p; p++) textLen++;
-    _dirtyExpand(bm, (WORD)x, (WORD)y,
-                 (WORD)(x + 8 * textLen - 1), (WORD)(y + 7));
+    if (textLen == 0) return;
+    /* Clip the erase rect to the bitmap — print_centered can produce a
+     * negative x for over-wide strings, and a negative coordinate cast to
+     * UWORD blits far outside the allocation. The per-glyph drawing below
+     * does its own bounds checks. */
+    ex = x; ey = y; ew = textLen * 8; eh = 8;
+    if (ex < 0) { ew += ex; ex = 0; }
+    if (ey < 0) { eh += ey; ey = 0; }
+    if (ex + ew > bw) ew = bw - ex;
+    if (ey + eh > bh) eh = bh - ey;
+    if (ew <= 0 || eh <= 0) return;
+    _dirtyExpand(bm, (WORD)ex, (WORD)ey,
+                 (WORD)(ex + ew - 1), (WORD)(ey + eh - 1));
     /* Erase text area to black first, then immediately draw colored text.
      * Both happen back-to-back to minimise beam racing tearing. */
     blitWait();
-    blitRect(bm->pBitmap, (UWORD)x, (UWORD)y, (UWORD)(textLen * 8), 8, 0);
+    blitRect(bm->pBitmap, (UWORD)ex, (UWORD)ey, (UWORD)ew, (UWORD)eh, 0);
     /* Draw each character — solid color block, then carve out unset pixels */
     while (*text) {
         UBYTE ch = (UBYTE)*text;
@@ -1112,7 +1216,7 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
         } else {
             glyph = s_font8x8[0];
         }
-        if (cx >= 0 && cx + 7 < bw) {
+        if (cx >= 0 && cx + 7 < bw && y >= 0 && y + 7 < bh) {
             /* Draw solid color block for this character */
             blitWait();
             blitRect(bm->pBitmap, (UWORD)cx, (UWORD)y, 8, 8, (UBYTE)color);
@@ -1900,7 +2004,10 @@ void amipython_dual_playfield_show(AmipyDualPlayfield *dpf) {
     g_pCustom->bplcon0 = (UWORD)((AMIPY_DPF_BPP << 12) | (1 << 10) | (1 << 9));
     /* BPLCON2 default — PFA in front of PFB. */
     g_pCustom->bplcon2 = 0;
-    systemUnuse();
+    if (!s_bSystemUnused) {
+        systemUnuse();
+        s_bSystemUnused = 1;
+    }
     /* Push the palette to hardware now so the first frame doesn't render
      * with reg 0..15 still at zero. */
     _palette_apply_fade();
@@ -2028,7 +2135,10 @@ void amipython_tilemap_show(AmipyTilemap *tm) {
     }
 
     viewLoad(tm->pView);
-    systemUnuse();
+    if (!s_bSystemUnused) {
+        systemUnuse();
+        s_bSystemUnused = 1;
+    }
 }
 
 void amipython_tilemap_camera(AmipyTilemap *tm, LONG x, LONG y) {

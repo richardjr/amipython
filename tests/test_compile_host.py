@@ -754,3 +754,66 @@ miss: bool = a.overlaps(b)
         # Trace lines confirm the AABB inputs and outputs end-to-end.
         assert "[sprite] overlaps (50,50 16x16) (58,58 16x16) -> 1" in output
         assert "[sprite] overlaps (50,50 16x16) (200,200 16x16) -> 0" in output
+
+    def test_annotated_engine_constructor(self):
+        # Regression: `bm: Bitmap = Bitmap(...)` used to bypass the
+        # constructor dispatch table and emit literal Python into the C.
+        output = _compile_and_run('''
+from amiga import Display, Bitmap
+
+display: Display = Display(320, 200, bitplanes=3)
+bm: Bitmap = Bitmap(320, 200, bitplanes=3)
+display.show(bm)
+''')
+        assert "[display] init 320x200 3bp" in output
+        assert "[bitmap] init 320x200 3bp" in output
+
+    def test_same_variable_name_across_functions(self):
+        # Regression: emit-time variable lookup used to scan every
+        # function's locals, so `p` being a loop ref (pointer) in one
+        # function made an unrelated value struct `p` in another emit
+        # `p->x` and fail to compile.
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class P:
+    x: int = 0
+
+ps: list[P] = []
+ps.append(P(x=1))
+ps.append(P(x=2))
+
+def total_of_list() -> int:
+    total = 0
+    for p in ps:
+        total = total + p.x
+    return total
+
+def local_struct() -> int:
+    p = P(x=5)
+    p.x = 7
+    return p.x
+
+print(total_of_list())
+print(local_struct())
+''')
+        lines = output.strip().split("\n")
+        assert lines[0].strip() == "3"
+        assert lines[1].strip() == "7"
+
+    def test_list_loop_nested_in_range_loop(self):
+        # Regression: _collect_for_idx_vars did not recurse into range()
+        # loops, so the inner list loop's _idx variable was never declared.
+        output = _compile_and_run('''
+vals: list[int] = []
+vals.append(3)
+vals.append(4)
+
+total = 0
+for i in range(2):
+    for v in vals:
+        total = total + v
+print(total)
+''')
+        assert output.strip() == "14"

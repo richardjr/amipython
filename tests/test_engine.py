@@ -451,10 +451,13 @@ class TestMusicModule:
         c = _emit("from amiga import music\nmusic.volume(48)")
         assert "amipython_music_volume(48);" in c
 
-    def test_music_load_no_embed(self):
-        """Without source_dir, music.load falls through to regular call."""
-        c = _emit("from amiga import music\nmusic.load(\"data/song.mod\")")
-        assert 'amipython_music_load("data/song.mod");' in c
+    def test_music_load_no_embed_is_error(self):
+        """Without an embeddable file, music.load is a transpile error —
+        the path-based runtime call is a silent no-op on Amiga."""
+        import pytest
+        from amipython.errors import EmitError
+        with pytest.raises(EmitError, match="could not embed"):
+            _emit("from amiga import music\nmusic.load(\"data/song.mod\")")
 
     def test_music_no_variable_declaration(self):
         c = _emit("from amiga import music\nmusic.play()")

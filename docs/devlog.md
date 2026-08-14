@@ -2,6 +2,58 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2026-08-14: Hardening round — silent wrong-C emission and C-runtime robustness
+
+A code-review sweep found four ways the transpiler emitted wrong C with no
+Python-level error, plus several C-runtime traps. All fixed in one pass
+(342 tests, +11 regression tests):
+
+**Transpiler:**
+- **Annotated assignments bypassed constructor dispatch.** `bm: Bitmap = Bitmap(...)`
+  emitted literal Python into the C file — `_emit_ann_assign` had none of
+  `_emit_assign`'s engine/static/struct/trig special cases. Now delegates to
+  the same path via a synthesized `ast.Assign`.
+- **Emit-time variable lookup ignored function scope.** `_get_var_info` scanned
+  *every* function's locals in insertion order, so `p` being a loop-ref
+  (pointer) in one function made an unrelated value-struct `p` elsewhere emit
+  `p->x`. The emitter now tracks `_current_function` and resolves
+  current-scope-then-globals only.
+- **Required kwargs silently dropped.** Registry kwargs with a `None` default
+  (copper.color_at, collision.register) were skipped when missing, shifting
+  later args into the wrong C parameter slots. Now a TypeCheckError (plus an
+  EmitError backstop).
+- **`_collect_for_idx_vars` didn't recurse into `range()` loops** — a list loop
+  nested inside `for i in range(n)` produced an undeclared `_idx` C89 variable.
+- Typed errors replace crashes for `Shape()`/`Sprite()` direct construction and
+  `list[T]` function parameters; `-> None` return annotations are now accepted.
+- **`music.load`/`sfx.load` that can't embed are transpile errors.** The
+  path-based runtime calls are no-ops on Amiga (no disk loading), so falling
+  back to them just produced silence on hardware.
+
+**C runtime:**
+- **Second `display.show()` destroyed the live framebuffer** — the redirect
+  logic blitted pBack onto itself then `bitmapDestroy`ed it. Now guarded by
+  `bm->pBitmap != pBfr->pBack`. `systemUnuse`/`systemUse` are balanced via a
+  flag (each show-path used to unuse unconditionally).
+- **`engine_destroy` only tore down one display kind** (if/else-if) — now
+  independent ifs with a single give-back-to-OS prologue, and the
+  `s_pActive*` globals are reset.
+- **`box_filled` and `print_at`'s erase pass had no clipping** — negative
+  coordinates cast to UWORD wrap to ~65535 and blit outside the allocation
+  (clear_rect/copy_from already clipped). `shape_grab` similarly clamps the
+  word-aligned grab rect to the source bitmap now.
+- **Asset reload leaked chip RAM** — shape re-grab/re-load, bitmap re-load and
+  sprite re-grab now free the previous tBitMap/mask first (guarded so the
+  display's own framebuffer is never destroyed; emitter zero-inits
+  engine-object stack locals so the previous-pointer checks are safe).
+- `copper.color_at` validates register 0..31 / scanline 0..255 (out-of-range
+  MOVEs would hit unrelated custom registers); preview mirrors the guard.
+- `_loadBitmapAsset` rejects paths that would overflow its 128-byte buffer;
+  load failures now leave the target struct intact instead of half-written.
+- `docker/patch_ace.py` verifies each patch applied and exits non-zero on a
+  pattern mismatch (upstream `_ace_dbg` removal is recognised as fine) — an
+  upstream ACE change can no longer silently reintroduce the CLI crash.
+
 ## 2026-04-27: TODO — `storage.save_*` freezes on write-protected disk under Amiberry
 
 **Status:** Open. Workaround in place (save call commented out in `examples/amitetris/amitetris.py`).
