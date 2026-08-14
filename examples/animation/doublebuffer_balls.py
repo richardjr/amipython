@@ -5,6 +5,11 @@
 # The run() function handles VWait, buffer swap, and UnQueue/QBlit automatically.
 # Try increasing the ball count -- double buffering eliminates the flicker
 # that the single-buffer version (bouncing_blits.py) would show.
+#
+# NOTE: aspirational — not yet runnable. Relies on engine features that do
+# not exist yet: Display(double_buffer=True) and the BlitQueue automatic
+# erase management (there is no bitmap or display.show() here, so nothing
+# is drawn today). For the working idiom see bouncing_blits.py.
 
 from dataclasses import dataclass
 from amiga import Display, Shape, joy, rnd, run
@@ -41,4 +46,4 @@ def update():
 
         display.blit(ball_shape, b.x, b.y)
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

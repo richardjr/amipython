@@ -5,22 +5,24 @@
 # Adapted to OCS planar display (8 colours instead of 256-colour chunky).
 # Particles explode outward from the centre in random directions, fading
 # out over time. When the fade completes, the explosion resets.
-# Demonstrates particle systems with pre-computed trig lookup tables.
+# Demonstrates particle systems with pre-computed trig lookup tables and
+# a fixed particle pool that is re-seeded in place on each reset.
 
 from dataclasses import dataclass
-from amiga import Display, Bitmap, palette, joy, key, rnd, clamp, run, sin_table, cos_table
+from amiga import Display, Bitmap, palette, joy, rnd, run, sin_table, cos_table
 
 @dataclass
 class Particle:
-    x: float
-    y: float
-    vx: float
-    vy: float
+    x: float = 0.0
+    y: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
 
-NUM_PARTICLES = 500
-display = Display(320, 256, bitplanes=3, double_buffer=True)
-bm0 = Bitmap(320, 256, bitplanes=3)
-bm1 = Bitmap(320, 256, bitplanes=3)
+NUM_PARTICLES = 200
+
+display = Display(320, 256, bitplanes=3)
+bm = Bitmap(320, 256, bitplanes=3)
+display.show(bm)
 
 # White-to-dark greyscale palette for fading
 palette.set(0, 0, 0, 0)
@@ -36,38 +38,39 @@ sin_lut = sin_table(360)
 cos_lut = cos_table(360)
 
 particles: list[Particle] = []
-phase = 0
+for i in range(NUM_PARTICLES):
+    particles.append(Particle())
+
+phase: int = 0
 
 def reset_explosion():
-    global particles, phase
-    particles = []
+    global phase
     phase = 0
-    for i in range(NUM_PARTICLES):
-        angle = rnd(360)
-        speed = rnd() * 4.4 + rnd() * 1.6 + 0.5
-        particles.append(Particle(
-            x=160.0,
-            y=128.0,
-            vx=cos_lut[angle] * speed,
-            vy=sin_lut[angle] * speed,
-        ))
+    for p in particles:
+        a = rnd(360)
+        s = rnd(44) * 0.1 + 0.5
+        p.x = 160.0
+        p.y = 128.0
+        p.vx = cos_lut[a] * s
+        p.vy = sin_lut[a] * s
 
 reset_explosion()
 
 def update():
     global phase
 
-    bm = display.current_bitmap()
     bm.clear()
 
-    # Calculate current brightness (fades from 7 down to 1)
-    color = clamp(7 - phase // 36, 1, 7)
+    # Current brightness (fades from 7 down to 1)
+    color = 7 - phase // 36
+    if color < 1:
+        color = 1
 
     offscreen = 0
     for p in particles:
         px = int(p.x)
         py = int(p.y)
-        if 0 < px < 320 and 0 < py < 256:
+        if px > 0 and px < 320 and py > 0 and py < 256:
             bm.plot(px, py, color)
             p.x -= p.vx
             p.y -= p.vy
@@ -78,4 +81,4 @@ def update():
     if phase >= 252 or offscreen >= NUM_PARTICLES:
         reset_explosion()
 
-run(update, until=key.pressed(key.ESC))
+run(update, until=lambda: joy.button(0))

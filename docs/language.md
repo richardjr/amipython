@@ -477,6 +477,12 @@ hit_fish: bool = player.overlaps(fish)
   `collision.check()`.
 - `sprite.overlaps(other)` — half-open AABB on the last show() positions and
   grabbed widths/heights. Touching edges count as separate.
+- `mouse.set_pointer(sprite)` — attach a sprite to the mouse position (it
+  follows the pointer each frame; used as a custom cursor).
+- `display.sprites_behind(from_channel=N)` — declares channels N..7 as
+  behind the playfield. **Currently a stub in both the C runtime and the
+  preview** (the BPLCON2 priority write is a TODO) — sprites always render
+  in front today.
 
 ### Copper colour splits
 
@@ -588,6 +594,23 @@ run(update, until=lambda: joy.button(0))
 - In Python preview: pygame-based tile rendering with camera offset
 - `tile_size` must be a power of 2 (16 recommended for word-aligned blitter speed)
 - Map is column-major internally: `set_tile(x, y, tile_index)`
+
+Further Tilemap methods:
+
+```python
+tm = Tilemap.load_tiled("data/map.json", 320, 200, bitplanes=3)
+                                        # load a Tiled-format JSON map —
+                                        # tile data, tileset image and
+                                        # "blocking" tile properties come
+                                        # from the JSON
+t = tm.get_tile(5, 3)                   # read back a tile index (tile coords)
+if tm.is_blocking(px, py):              # True if the tile under the PIXEL
+    pass                                # coordinate is in the blocking set
+tm.draw_shape(shape, wx, wy)            # blit a shape over the tile layer at
+                                        # world pixel coords (player, bullets)
+```
+
+- `is_blocking` only works with `load_tiled` maps — the blocking set comes from the Tiled JSON's custom tile properties (see `examples/demo/game.py`)
 
 ### Joystick Directions
 

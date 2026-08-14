@@ -54,15 +54,6 @@ ENGINE_TYPE_MAP: dict[str, AmipyType] = {
     "DualPlayfield": AmipyType.DUAL_PLAYFIELD,
 }
 
-# printf format specifiers for each type
-FORMAT_MAP: dict[AmipyType, str] = {
-    AmipyType.INT: "%ld",
-    AmipyType.FLOAT: "%f",
-    AmipyType.BOOL: "%d",
-    AmipyType.STR: "%s",
-}
-
-
 @dataclass
 class StructField:
     name: str

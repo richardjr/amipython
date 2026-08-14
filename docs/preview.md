@@ -76,9 +76,17 @@ The preview module currently implements the Phase 2–5B API:
 | `music.play()` / `music.stop()` | Supported |
 | `music.volume(vol)` | Supported — 0-64 |
 | `Tilemap(...)` + `set_tile`, `show`, `scroll`, `camera` | Supported — pygame tile rendering with camera offset |
+| `Tilemap.load_tiled(json)` + `get_tile`, `is_blocking`, `draw_shape` | Supported — Tiled-format JSON maps with blocking tiles |
 | `Bitmap.load(path)` | Supported — loads PNG, applies palette |
+| `bm.clear_rect` / `copy_from` / `print_centered` / `print_right` | Supported |
+| `key.pressed` / `just_pressed` / `just_released` + `K_*` constants | Supported — raw-key codes mapped to pygame keys |
+| `copper.color_at(scanline=, register=, color=)` + `Color(r,g,b)` | Supported — per-scanline palette applied during present |
+| `DualPlayfield(fg, bg)` + `show`, `scroll_fg`, `scroll_bg` | Supported — two-layer composite, FG colour 0 transparent, wrap-around scroll |
+| `sprite.collided()` / `sprite.overlaps(other)` | Supported — playfield-colour and sprite-vs-sprite AABB |
+| `shuffle(lst)` / `int_to_str(n, width)` / `rnd(lo, hi)` | Supported |
+| `palette.fade(...)` | Supported |
 
-Not yet implemented: copper effects, dual playfield, scrolling, keyboard input.
+Not yet implemented: `display.sprites_behind` priority (accepted, not honoured — same as the C runtime), `BlitQueue`.
 
 ## Palette Fidelity
 
@@ -94,9 +102,9 @@ The internal surface runs at Amiga resolution (e.g. 320x256). The preview window
 
 ## Limitations
 
-- **No copper effects** — `copper.color_at()` per-scanline palette changes are not emulated
-- **No raw `display.scroll_to()`** — use `Tilemap` for scrolling (supported)
-- **Partial dual playfield** — `dual_playfield_auto` works; full `DualPlayfield` API is not yet wired
+- **No raw `display.scroll_to()`** — use `Tilemap` or `DualPlayfield` for scrolling (both supported)
+- **Sprite priority not honoured** — `display.sprites_behind()` is accepted but sprites always render in front (mirrors the C runtime's BPLCON2 TODO)
+- **No `BlitQueue`** — QBlit/UnQueue automatic erase management is still planned
 
 ## Architecture
 
@@ -110,10 +118,16 @@ src/amiga/
     _builtins.py      # wait_mouse(), vwait(), rnd(), run(), sin_table(), cos_table()
     _shape.py         # Shape — grab/load, blitting
     _sprite.py        # Sprite — hardware sprite emulation
-    _joy.py           # Joystick input
+    _joy.py           # Joystick input (+ edge-triggered variants)
+    _key.py           # Keyboard input — pressed/just_pressed/just_released, K_* constants
     _mouse.py         # Mouse input
     _collision.py     # Collision detection
+    _copper.py        # Per-scanline copper palette + Color(r,g,b)
+    _dual_playfield.py# Dual playfield two-layer compositing
+    _tilemap.py       # Tile-based scrolling display, Tiled JSON maps, blocking tiles
     _music.py         # ProTracker MOD playback via pygame.mixer
+    _sfx.py           # 8-slot WAV sound effects via pygame.mixer
+    _storage.py       # Persistent storage under ~/.amipython/<script>/
     _constants.py     # PAL_FPS=50, MAX_PALETTE=256, DEFAULT_SCALE=3
 ```
 

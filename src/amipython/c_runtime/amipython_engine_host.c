@@ -7,12 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include "amipython_engine.h"
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 static int s_joy_button_count = 0;
 
@@ -315,22 +310,6 @@ void amipython_bitmap_print_right_multi(AmipyBitmap *bm, LONG x_right, LONG y, L
 void amipython_display_sprites_behind(AmipyDisplay *d, LONG from_channel) {
     printf("[display] sprites_behind from_channel=%ld\n", from_channel);
     (void)d;
-}
-
-void amipython_sin_table(float *out, LONG n) {
-    LONG i;
-    printf("[math] sin_table %ld\n", n);
-    for (i = 0; i < n; i++) {
-        out[i] = (float)sin(2.0 * M_PI * (double)i / (double)n);
-    }
-}
-
-void amipython_cos_table(float *out, LONG n) {
-    LONG i;
-    printf("[math] cos_table %ld\n", n);
-    for (i = 0; i < n; i++) {
-        out[i] = (float)cos(2.0 * M_PI * (double)i / (double)n);
-    }
 }
 
 void amipython_music_load(const char *path) {

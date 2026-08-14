@@ -11,24 +11,16 @@ build/
 # pytest
 .pytest_cache/
 
-# Build artifacts in examples (only .py files are source)
-examples/**/*.c
-examples/**/*.h
-examples/**/CMakeLists.txt
-
-# Compiled Amiga binaries (extensionless executables in example dirs)
-examples/basic/display1
-examples/basic/minimal_display
-examples/animation/bounce_int
-examples/animation/bouncing_ball
-examples/animation/bouncing_blits
-examples/animation/orbiting_ball
-examples/demo/amipython_demo
-examples/sound/music
-examples/hello
-
-# Docker/CMake build directories inside examples
-examples/**/build/
+# Examples: only sources and data assets are tracked. Everything else —
+# generated .c/.h/CMakeLists, compiled Amiga binaries (extensionless),
+# converted .bm bitmaps, Docker/CMake build dirs — is a build artifact.
+examples/**
+!examples/**/
+!examples/**/*.py
+!examples/**/*.png
+!examples/**/*.mod
+!examples/**/*.wav
+!examples/**/*.json
 
 # ADF floppy images
 *.adf

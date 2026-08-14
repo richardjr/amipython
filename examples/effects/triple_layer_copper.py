@@ -5,6 +5,11 @@
 # colour gradients. Each layer gets its own colour cycling via the copper,
 # creating a parallax effect with just 3 bitplanes. The layers move in
 # different sinusoidal patterns.
+#
+# NOTE: aspirational — not yet runnable. Requires an engine feature that
+# does not exist yet: display.scroll_to() (hardware scrolling on a plain
+# Display). Also uses the out-of-subset clamp() builtin and iteration over
+# a list of Bitmaps. Kept as an API sketch.
 
 from amiga import Display, Bitmap, Shape, palette, copper, Color, joy, clamp, run, sin_table, cos_table
 

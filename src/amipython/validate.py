@@ -202,8 +202,6 @@ class Validator(ast.NodeVisitor):
             is_method_call = isinstance(node.func, ast.Attribute)
             if not (is_engine_constructor or is_run_call or is_struct_constructor or is_method_call):
                 self._reject(node, "keyword arguments are not supported")
-        if node.starargs if hasattr(node, "starargs") else False:
-            self._reject(node, "star arguments are not supported")
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign):

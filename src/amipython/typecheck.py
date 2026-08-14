@@ -6,7 +6,7 @@ Pass 2: Walk function bodies and module-level code, inferring expression types.
 
 import ast
 
-from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES, EngineStaticMethod
+from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import TypeCheckError
 from amipython.types import (
     ANNOTATION_MAP,
@@ -70,9 +70,7 @@ def _pass1(tree: ast.Module, info: TypeInfo):
             _collect_function(node, info)
         elif isinstance(node, ast.AnnAssign):
             _collect_global_annotated(node, info)
-        elif isinstance(node, ast.Assign):
-            # Will be typed in pass 2
-            pass
+        # Plain ast.Assign globals are typed in pass 2
 
 
 def _collect_struct(node: ast.ClassDef, info: TypeInfo):
@@ -963,7 +961,6 @@ class _TypeChecker(ast.NodeVisitor):
                 return self._resolve_field_type(node)
             # Module property access (e.g. mouse.x, mouse.y)
             if name in self.info.engine_modules:
-                from amipython.engine import MODULE_TYPES
                 mod = MODULE_TYPES[name]
                 if node.attr in mod.properties:
                     return mod.properties[node.attr].type

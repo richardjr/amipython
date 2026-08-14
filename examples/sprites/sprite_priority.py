@@ -6,6 +6,10 @@
 # channel 4 is behind it. A large circle on the bitmap demonstrates
 # the depth ordering. Channels 4-7 are set behind the playfield
 # with sprites_behind().
+#
+# NOTE: sprites_behind() is accepted but not yet honoured — the BPLCON2
+# priority write is a TODO in the C runtime, and the preview mirrors that.
+# Both sprites currently render in front of the playfield.
 
 from amiga import Display, Bitmap, Sprite, palette, vwait, wait_mouse
 

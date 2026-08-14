@@ -168,7 +168,7 @@ print(increment())
         assert [l.strip() for l in lines] == ["1", "2", "3"]
 
 
-class TestEngine:
+class TestEngineCore:
     def test_display_init(self):
         output = _compile_and_run('''
 from amiga import Display

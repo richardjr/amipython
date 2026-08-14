@@ -3,6 +3,11 @@
 #
 # Displays typed characters on screen. A simple text input demo
 # showing key.char() for reading keyboard input.
+#
+# NOTE: aspirational — not yet runnable. Requires an engine feature that
+# does not exist yet: key.char() (ASCII character input). Today's key
+# module only exposes per-key state: key.pressed / just_pressed /
+# just_released with K_* constants — see keyboard_keys.py.
 
 from amiga import Display, Bitmap, joy, key, run
 

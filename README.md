@@ -186,8 +186,8 @@ amipython scripts are valid Python — they run directly with `python game.py` u
 | **Lists** | `list[T]` with `.append()`, `.remove()`, `len()`, `for item in list:` |
 | **Functions** | Annotated params/return, recursion, `global` |
 | **Control flow** | `if`/`elif`/`else`, `while`, `for`/`range()`, `break`, `continue` |
-| **Builtins** | `print()`, `range()`, `int()`, `float()`, `abs()`, `len()` |
-| **Engine** | `Display`, `Bitmap`, `Shape`, `palette`, `joy`, `run()`, `vwait(n)`, `rnd()`, `sin_table()`, `cos_table()` |
+| **Builtins** | `print()`, `range()`, `int()`, `float()`, `abs()`, `len()`, `str()`, `int_to_str()`, `shuffle()` |
+| **Engine** | `Display`, `Bitmap`, `Shape`, `Sprite`, `Tilemap`, `DualPlayfield`, `palette`, `copper`, `Color()`, `joy`, `key`, `mouse`, `collision`, `music`, `sfx`, `storage`, `run()`, `vwait(n)`, `rnd()`, `sin_table()`, `cos_table()` |
 
 See [Language Subset](docs/language.md) for the full reference including type mapping, arithmetic semantics, and what's deliberately excluded.
 
@@ -199,7 +199,7 @@ See [Language Subset](docs/language.md) for the full reference including type ma
 | **2. Display + Drawing** | Done | `Display`, `Bitmap`, palette, `circle_filled`, `plot`, `clear`, `wait_mouse()`. OCS/ECS (max 5 bitplanes / 32 colours) |
 | **3. Game Loop + Sprites/Bobs** | Done | `run()`, double buffering, `Shape.grab()`, `display.blit()`, `joy.button()`, `rnd()` |
 | **4. Classes + Lists** | Done | `@dataclass` structs, `list[T]`, field access/mutation, list iteration/subscript, `len()`, `append()`, `remove()`, `sin_table()`, `cos_table()`, `box_filled()`, ADF floppy output |
-| **5. Copper, Collision, Audio** | Planned | Per-scanline effects, hardware collision, dual playfield, Paula sound |
+| **5. Assets, Audio, Copper, DPF** | Mostly done | PNG/IFF loading, MOD music + SFX (ptplayer), keyboard input, `storage`, per-scanline copper effects, hardware sprites, hardware dual playfield. Remaining: `BlitQueue` (QBlit/UnQueue) |
 
 ## Commands
 
@@ -225,19 +225,25 @@ amipython build-ace-image            # build the ACE Docker image (one-time)
 
 ## Examples
 
-29 examples across 7 categories in `examples/`:
+~45 examples across 13 categories in `examples/`, including two complete games:
 
 | Category | Examples |
 |---|---|
-| **basic** | Minimal display, palette bars |
-| **drawing** | Circles, polygons, random shapes, mouse lines |
-| **animation** | Bouncing ball, double-buffered balls, QBlit queue, 3D vector stars |
+| **amitetris** | Complete Tetris game — scenes, scoring, MOD music, SFX, persistent high scores |
+| **amifish** | Fishing game — hardware sprites, sprite-vs-sprite collision, copper gradient |
+| **basic** | Minimal display, palette bars, grid pattern, score display, 7-bag shuffle |
+| **drawing** | Random circles, mouse lines (polygons: aspirational) |
+| **animation** | Bouncing ball (float + int variants), blits, orbiting ball, 3D vector stars |
 | **sprites** | Hardware sprites, priority, collision |
-| **scrolling** | Smooth scroll, tile scroll, dual playfield, momentum |
-| **effects** | Copper gradients, starfields (horizontal + radial), pixel explosion |
-| **input** | Joystick, mouse, keyboard |
+| **scrolling** | Tilemap scroll, dual playfield (auto + parallax) |
+| **effects** | Copper gradients + lines, equaliser, starfields, pixel explosion |
+| **input** | Joystick/mouse, keyboard status + keys, edge-triggered input |
+| **palette** | Palette fades |
+| **sound** | MOD music playback, SFX |
+| **storage** | Persistent high scores |
+| **demo** | Combined showpiece (logo, starfield, equaliser, music), Tiled tilemap game |
 
-All examples use `@dataclass` for data structures and `list[T]` for collections. They run with both `python game.py` (preview) and `amipython run game.py` (real Amiga).
+Examples run with both `python game.py` (preview) and `amipython run game.py` (real Amiga). A few are marked `aspirational` in their header comment — API sketches for engine features that don't exist yet (e.g. `display.scroll_to`, `polygon_filled`, `key.char`, `BlitQueue`).
 
 ## Documentation
 
@@ -248,4 +254,5 @@ All examples use `@dataclass` for data structures and `list[T]` for collections.
 | [Python Preview](docs/preview.md) | Running scripts directly in Python with pygame, how it works |
 | [Running in Amiberry](docs/amiberry.md) | Emulator setup, Kickstart 3.1 requirement, troubleshooting |
 | [Architecture](docs/architecture.md) | Build system, cross-compilation, design decisions, prior art |
+| [Credits](docs/credits.md) | Acknowledgements — ACE, ptplayer, GCC/vbcc, demo assets |
 | [Dev Log](docs/devlog.md) | Technical notes — problems hit, root causes, and solutions |

@@ -1274,38 +1274,6 @@ void amipython_shuffle(LONG *items, LONG count) {
     }
 }
 
-static float _sin_approx(float x) {
-    /* Taylor series sin(x) — 5 terms, adequate for lookup tables.
-     * Normalize x to [-pi, pi] range first. */
-    float x2, x3, x5, x7;
-    float pi = 3.14159265f;
-    /* Reduce to [-pi, pi] */
-    while (x > pi) x -= 2.0f * pi;
-    while (x < -pi) x += 2.0f * pi;
-    x2 = x * x;
-    x3 = x2 * x;
-    x5 = x3 * x2;
-    x7 = x5 * x2;
-    return x - x3 / 6.0f + x5 / 120.0f - x7 / 5040.0f;
-}
-
-void amipython_sin_table(float *out, LONG n) {
-    LONG i;
-    float step = 6.28318530f / (float)n;  /* 2*pi / n */
-    for (i = 0; i < n; i++) {
-        out[i] = _sin_approx((float)i * step);
-    }
-}
-
-void amipython_cos_table(float *out, LONG n) {
-    LONG i;
-    float step = 6.28318530f / (float)n;
-    float half_pi = 1.57079632f;
-    for (i = 0; i < n; i++) {
-        out[i] = _sin_approx((float)i * step + half_pi);
-    }
-}
-
 /* ----------------------------------------------------------------
  * Music — ProTracker MOD playback via ptplayer
  * ---------------------------------------------------------------- */
@@ -2656,20 +2624,6 @@ void amipython_dual_playfield_scroll_fg(AmipyDualPlayfield *dpf, LONG x, LONG y)
 void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf, LONG x, LONG y) {
     if (dpf) { dpf->scrollBgX = (WORD)x; dpf->scrollBgY = (WORD)y; }
     amipython_print_str("[dpf] scroll_bg\n");
-}
-
-void amipython_sin_table(float *out, LONG n) {
-    amipython_print_str("[math] sin_table ");
-    amipython_print_long(n);
-    amipython_print_str("\n");
-    (void)out;
-}
-
-void amipython_cos_table(float *out, LONG n) {
-    amipython_print_str("[math] cos_table ");
-    amipython_print_long(n);
-    amipython_print_str("\n");
-    (void)out;
 }
 
 void amipython_music_load(const char *path) {

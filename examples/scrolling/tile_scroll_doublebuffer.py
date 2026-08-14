@@ -8,6 +8,11 @@
 #
 # This demonstrates the Tilemap object which handles the oversized
 # bitmap, tile column replacement, and QWrap scroll offset internally.
+#
+# NOTE: aspirational — not yet runnable. Uses an API that does not exist:
+# Tilemap.load(path, tile_shape=...) and key.held(). For the working
+# Tilemap API (constructor + set_tile / load_tiled + scroll), see
+# tilemap_scroll.py and demo/game.py.
 
 from amiga import Display, Tilemap, joy, key, run
 

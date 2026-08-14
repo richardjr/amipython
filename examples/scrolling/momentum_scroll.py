@@ -4,6 +4,10 @@
 # Random circles on a bitmap that wraps seamlessly in both axes.
 # Mouse speed adds momentum; the viewport glides with inertia.
 # Demonstrates wrap() for seamless scrolling and clamp() for speed limits.
+#
+# NOTE: aspirational — not yet runnable. Requires engine features that do
+# not exist yet: display.scroll_to(), Bitmap.copy_region(), mouse.x_speed/
+# y_speed, and the wrap()/clamp() builtins. Kept as an API sketch.
 
 from amiga import Display, Bitmap, mouse, joy, rnd, wrap, clamp, run
 

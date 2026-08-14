@@ -5,6 +5,12 @@
 # erase/draw management. This is single-buffered -- the run() function
 # handles UnQueue and QBlit calls. For flicker-free animation with
 # more objects, see doublebuffer_balls.py.
+#
+# NOTE: aspirational — not yet runnable. Relies on the BlitQueue engine
+# feature (automatic QBlit/UnQueue erase management), which is still on
+# the Phase 5 todo list: there is no bitmap or display.show() here, so
+# nothing is drawn today. For the working blit idiom (explicit bitmap +
+# clear each frame), see bouncing_blits.py.
 
 from dataclasses import dataclass
 from amiga import Display, Shape, joy, rnd, run
@@ -40,4 +46,4 @@ def update():
 
         display.blit(ball_shape, b.x, b.y)
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

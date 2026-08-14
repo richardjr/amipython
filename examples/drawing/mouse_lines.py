@@ -13,4 +13,4 @@ display.show(bm)
 def update():
     bm.line(160, 128, mouse.x, mouse.y, 1)
 
-run(update, until=joy.button(0))
+run(update, until=lambda: joy.button(0))

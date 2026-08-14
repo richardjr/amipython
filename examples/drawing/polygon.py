@@ -3,6 +3,9 @@
 #
 # Draws a filled polygon shape on an 8-colour display.
 # Demonstrates the polygon_filled() drawing primitive.
+#
+# NOTE: aspirational — not yet runnable. Requires an engine feature that
+# does not exist yet: Bitmap.polygon_filled(). Kept as an API sketch.
 
 from amiga import Display, Bitmap, palette, wait_mouse
 

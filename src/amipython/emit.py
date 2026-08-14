@@ -1,7 +1,6 @@
 """C89 code emitter for the amipython transpiler."""
 
 import ast
-import math
 import re
 
 from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES
@@ -9,7 +8,6 @@ from amipython.errors import EmitError
 from amipython.types import (
     C_TYPE_MAP,
     ENGINE_TYPE_MAP,
-    FORMAT_MAP,
     AmipyType,
     TypeInfo,
     VariableInfo,
@@ -406,9 +404,6 @@ class _Emitter:
             return f"{c_type}{name}"
         return f"{c_type} {name}"
 
-    def _format_spec(self, t: AmipyType) -> str:
-        return FORMAT_MAP[t]
-
     def _expr_type(self, node: ast.expr) -> AmipyType:
         t = self.info.expr_types.get(id(node))
         if t is None:
@@ -778,21 +773,11 @@ class _Emitter:
                 self._emit_struct_init(target.id, node.value)
                 return
             # Trig table: orbit_x = cos_table(720)
-            # Values pre-computed at transpile time — array already initialized at declaration
+            # Values pre-computed at transpile time (typecheck requires a
+            # literal size arg) — array already initialized at declaration.
             if (isinstance(node.value, ast.Call)
                     and isinstance(node.value.func, ast.Name)
                     and node.value.func.id in ("sin_table", "cos_table")):
-                var = self._get_var_info(target.id)
-                if var and var.list_init_values is not None:
-                    # Already initialized at declaration — nothing to emit
-                    pass
-                else:
-                    # Fallback to runtime call for non-literal args
-                    func_name = node.value.func.id
-                    c_name = f"amipython_{func_name}"
-                    arg = self._emit_expr(node.value.args[0])
-                    self._line(f"{c_name}({target.id}_items, {arg});")
-                    self._line(f"{target.id}_count = {arg};")
                 return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")

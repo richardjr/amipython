@@ -67,7 +67,7 @@ These must all stay in sync. A feature is not done until it works in all three p
 
 Blitz Basic's numbered-slot model (`BitMap 0`, `Shape 0`) becomes named Python objects. The `run()` function abstracts double buffering, VWait timing, and blit queue management. See `docs/blitz-comparison.md` for 12 side-by-side examples.
 
-Key modules: `Display`, `Bitmap`, `Shape`, `Sprite`, `Tilemap`, `palette`, `joy`, `mouse`, `collision`, `music`. Planned: `DualPlayfield` (full), `copper`, `key`, `BlitQueue`.
+Key modules: `Display`, `Bitmap`, `Shape`, `Sprite`, `Tilemap`, `DualPlayfield`, `palette`, `copper`, `joy`, `key`, `mouse`, `collision`, `music`, `sfx`, `storage`. Planned: `BlitQueue` (QBlit/UnQueue).
 
 **Asset pipeline.** `Shape.load(path)` and `Bitmap.load(path)` accept PNG / IFF ILBM. At transpile time `assets.py` collects the asset paths from the generated C, converts them to ACE's planar `.bm` format (with colour-0-keyed masks where applicable), and copies them into the build directory. Music loaded via `music.load(path)` is embedded the same way as a raw MOD byte buffer. ADF output (`amipython adf`) packages the binary plus all `data/` files into a bootable 880KB FFS image via amitools `xdftool` (see `adf.py`).
 
@@ -83,7 +83,7 @@ src/
     validate.py                   # AST validator — rejects unsupported Python features
     typecheck.py                  # Type checker — implicit static typing, struct/list inference
     emit.py                       # C89 code emitter
-    engine.py                     # Engine type registry (Display, Bitmap, Shape, Sprite, Tilemap, palette, joy, mouse, music, collision, builtins)
+    engine.py                     # Engine type registry (Display, Bitmap, Shape, Sprite, Tilemap, DualPlayfield, palette, copper, joy, key, mouse, music, sfx, storage, collision, builtins)
     types.py                      # AmipyType enum + VariableInfo / StructInfo
     errors.py                     # Exception types (ParseError, ValidationError, TypeCheckError, EmitError, BuildError)
     assets.py                     # PNG/IFF → ACE .bm planar bitmap conversion + mask generation
@@ -105,24 +105,32 @@ src/
     _shape.py                     # Shape — grab/load, transparent index 0 for blits
     _sprite.py                    # Sprite — hardware sprite emulation (.grab/.show/.move)
     _tilemap.py                   # Tilemap — tile-based scrolling display, blocking tiles, pending blits
-    _joy.py                       # Joystick — button/left/right/up/down (port 0 mouse, port 1 keyboard)
+    _dual_playfield.py            # DualPlayfield — two-layer parallax compositing (FG colour 0 transparent)
+    _copper.py                    # copper.color_at per-scanline palette + Color(r,g,b) builtin
+    _joy.py                       # Joystick — button/left/right/up/down + edge-triggered variants
+    _key.py                       # Keyboard — pressed/just_pressed/just_released + K_* raw-key constants
     _mouse.py                     # Mouse — x/y position, set_pointer for sprite-attached cursor
     _collision.py                 # Collision detection — playfield colour register/check
     _music.py                     # ProTracker MOD playback via pygame.mixer (load/play/stop/volume)
-    _builtins.py                  # wait_mouse(), vwait(n), rnd(n), run(update, until=), sin_table, cos_table
+    _sfx.py                       # 8-slot WAV sound effects via pygame.mixer
+    _storage.py                   # Persistent storage — save/load int lists and strings (~/.amipython/<stem>/)
+    _builtins.py                  # wait_mouse(), vwait(n), rnd(n[,hi]), run(update, until=), sin_table, cos_table, int_to_str, shuffle
     _constants.py                 # PAL_FPS=50, MAX_PALETTE=256, DEFAULT_SCALE=3
 examples/                         # Example scripts (runnable with both `python` and `amipython`)
   hello.py                        # CLI hello world (Phase 1 — vbcc/vamos path, no engine)
-  basic/                          # display1, minimal_display, palette_bars
-  drawing/                        # mouse_lines, polygon, random_circles
-  animation/                      # bouncing_ball, bouncing_blits, doublebuffer_balls, qblit_balls, orbiting_ball, vector_stars_3d, bounce_int
+  amitetris/                      # Complete Tetris game (ADR 0001 coverage game) — scenes, scoring, music, SFX, storage
+  amifish/                        # Fishing game (ADR 0003 coverage game) — hardware sprites, sprite AABB, copper gradient
+  basic/                          # display1, minimal_display, palette_bars, grid_pattern, score_display, seven_bag
+  drawing/                        # mouse_lines, random_circles, polygon (aspirational: polygon_filled)
+  animation/                      # bouncing_ball, bouncing_blits, orbiting_ball, vector_stars_3d, bounce_int; aspirational: doublebuffer_balls, qblit_balls (BlitQueue)
   sprites/                        # sprite_move, sprite_priority, sprite_collision
-  scrolling/                      # smooth_scroll, momentum_scroll, tilemap_scroll, tile_scroll_doublebuffer, dual_playfield, dual_playfield_auto
-  effects/                        # copper_gradient, copper_lines, triple_layer_copper, starfield_horizontal, starfield_radial, pixel_explosion, equaliser
-  input/                          # joystick_mouse, keyboard_status, keyboard_typing
+  scrolling/                      # tilemap_scroll, dual_playfield, dual_playfield_auto; aspirational: smooth_scroll, momentum_scroll, tile_scroll_doublebuffer (display.scroll_to)
+  effects/                        # copper_gradient, copper_lines, starfield_horizontal, starfield_radial, pixel_explosion, equaliser; aspirational: triple_layer_copper
+  input/                          # joystick_mouse, keyboard_status, keyboard_keys, edge_trigger; aspirational: keyboard_typing (key.char)
   palette/                        # fade
-  sound/                          # music (MOD playback via ptplayer / pygame.mixer)
-  demo/                           # amipython_demo, logo, logo_grab, starfield_nologo, generate_assets — combined showpiece + asset generation script
+  sound/                          # music, sfx_blip (MOD playback + WAV SFX via ptplayer / pygame.mixer)
+  storage/                        # high_scores — persistent int-list save/load
+  demo/                           # amipython_demo (combined showpiece), game (Tiled tilemap shooter), generate_assets
 docs/                             # Documentation
   preview.md                      # Python preview setup, usage, supported API table, palette fidelity
   language.md                     # Supported Python subset, data types, engine imports, builtins
@@ -183,7 +191,8 @@ pytest -m docker                     # Docker cross-compilation tests only
 4. **Phase 4** — Classes + lists + scrolling (done): `@dataclass` structs, `list[T]`, field access, iteration, `len`, `append`, `remove`, `sin_table`, `cos_table`, `box_filled`, ADF floppy output, `Tilemap`, sprite collision
 5. **Phase 5A** — Image/asset loading (done): `Shape.load("data/x.png")`, `Bitmap.load(...)`, PNG/IFF → ACE `.bm` at build time, mask auto-generated from colour 0
 6. **Phase 5B** — Music (done): `music.load/play/stop/volume`, MOD embedded at transpile time, ACE ptplayer + pygame.mixer
-7. **Phase 5 (remaining)** — Copper effects (per-scanline palette), full dual playfield, keyboard input
+7. **Phase 5C** — Coverage-game engine work (done): `key` module + edge-triggered input, `str()`/`int_to_str`, variadic `print_at/centered/right`, `storage`, `sfx`, `shuffle`, `clear_rect`, `copy_from`, copper (`copper.color_at` + `Color`), hardware sprites (ACE sprite manager), hardware dual playfield (`DualPlayfield`)
+8. **Phase 5 (remaining)** — `BlitQueue` (QBlit/UnQueue ordered blits); `display.sprites_behind` BPLCON2 priority is still a stub
 
 ## vbcc Cross-Compilation Notes
 

@@ -33,3 +33,11 @@ class Display:
         if self._bm is not None:
             self._bm._surface.blit(shape._surface, (int(x), int(y)))
             Backend.get().present(self._bm._surface)
+
+    def sprites_behind(self, *, from_channel: int = 4) -> None:
+        """Accepted but not yet honoured — sprites always render in front.
+
+        Mirrors the C runtime, where the BPLCON2 priority write is still a
+        TODO. Stored so the setting takes effect once either side lands.
+        """
+        self._sprites_behind_from = from_channel

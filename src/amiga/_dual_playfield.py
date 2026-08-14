@@ -28,12 +28,6 @@ except ImportError:
 WINDOW_W = 320
 WINDOW_H = 200
 
-# Translation table mapping BG bitmap pixel values 1..7 to palette regs
-# 9..15 — the +8 offset OCS DPF mode applies in hardware (PFB indexes
-# palette regs 8..15 instead of 0..7). Built once at import time.
-_BG_INDEX_REMAP = bytes([0] + [i + 8 for i in range(1, 8)] + list(range(8, 256)))
-
-
 class DualPlayfield:
     """Preview-side dual playfield: two bitmaps composited each frame."""
 
@@ -80,10 +74,10 @@ class DualPlayfield:
         bg_x, bg_y = self._scroll_bg
         fg_x, fg_y = self._scroll_fg
         bg_shifted = self._bg_remapped(self._bg._surface)
-        self._tiled_blit(bg_shifted, bg_x, bg_y, transparent=False)
+        self._tiled_blit(bg_shifted, bg_x, bg_y)
         fg_keyed = self._fg._surface.copy()
         fg_keyed.set_colorkey(0)
-        self._tiled_blit(fg_keyed, fg_x, fg_y, transparent=True)
+        self._tiled_blit(fg_keyed, fg_x, fg_y)
         Backend.get().present(self._composite)
 
     def _bg_remapped(self, src: pygame.Surface) -> pygame.Surface:
@@ -96,8 +90,7 @@ class DualPlayfield:
         out.set_palette(Backend.get()._palette)
         return out
 
-    def _tiled_blit(self, src: pygame.Surface, scroll_x: int, scroll_y: int,
-                    *, transparent: bool) -> None:
+    def _tiled_blit(self, src: pygame.Surface, scroll_x: int, scroll_y: int) -> None:
         """Blit `src` onto the composite, wrapping at its edges so that a
         wider/taller source can scroll continuously. The composite is the
         visible window, smaller than (or equal to) the source bitmap."""

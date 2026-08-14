@@ -4,6 +4,11 @@
 # Draws random dots on an oversized bitmap, then scrolls the viewport
 # by following the mouse position. Demonstrates hardware scroll registers
 # via display.scroll_to().
+#
+# NOTE: aspirational — not yet runnable. Requires an engine feature that
+# does not exist yet: display.scroll_to() (hardware scrolling on a plain
+# Display). For scrolling today, use Tilemap (tilemap_scroll.py) or
+# DualPlayfield (dual_playfield.py).
 
 from amiga import Display, Bitmap, mouse, joy, rnd, run
 
