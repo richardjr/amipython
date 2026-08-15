@@ -60,7 +60,8 @@ These must all stay in sync. A feature is not done until it works in all three p
 - No dynamic features: no eval, getattr, metaclasses, decorators, generators, closures
 - No garbage collection — static allocation + arena allocators
 - Game builtins (`Display`, `Sprite`, `Tilemap`, etc.) map to engine C API calls
-- `from amiga import ...` — the only allowed import
+- `from amiga import ...` for the engine, `from dataclasses import dataclass`, and `from <mod> import ...` for sibling modules (spliced into one C unit by `modules.py`; top-level names unique across modules; never rebind an imported name — shared scalars live in a `@dataclass` state object)
+- Structs and engine objects are passed to functions by reference (C pointers); `[v] * N` sizes a list (grids)
 - `run(update_fn, until=condition)` is the game loop — handles VWait, double buffer, QBlit/UnQueue
 
 ## API Design Pattern
@@ -78,7 +79,8 @@ src/
   amipython/                      # Transpiler + build system
     __main__.py                   # `python -m amipython` entry point
     cli.py                        # Click CLI (transpile, build, run, adf, build-ace-image)
-    pipeline.py                   # Orchestrates parse → validate → typecheck → emit → assets
+    pipeline.py                   # Orchestrates load_program → validate → typecheck → emit → assets
+    modules.py                    # Multi-module splice: sibling `from <mod> import` → one unit, file:line error mapping
     parse.py                      # Thin wrapper around ast.parse with ParseError reporting
     validate.py                   # AST validator — rejects unsupported Python features
     typecheck.py                  # Type checker — implicit static typing, struct/list inference
@@ -120,7 +122,7 @@ examples/                         # Example scripts (runnable with both `python`
   hello.py                        # CLI hello world (Phase 1 — vbcc/vamos path, no engine)
   amitetris/                      # Complete Tetris game (ADR 0001 coverage game) — scenes, scoring, music, SFX, storage
   amifish/                        # Fishing game (ADR 0003 coverage game) — hardware sprites, sprite AABB, copper gradient
-  basic/                          # display1, minimal_display, palette_bars, grid_pattern, score_display, seven_bag
+  basic/                          # display1, minimal_display, palette_bars, grid_pattern, score_display, seven_bag, multi_module/ (sibling modules, sized lists, by-ref params, 320×256 blits)
   drawing/                        # mouse_lines, random_circles, polygon (aspirational: polygon_filled)
   animation/                      # bouncing_ball, bouncing_blits, orbiting_ball, vector_stars_3d, bounce_int; aspirational: doublebuffer_balls, qblit_balls (BlitQueue)
   sprites/                        # sprite_move, sprite_priority, sprite_collision
@@ -174,6 +176,7 @@ amipython transpile game.py          # transpile only → game.c + headers
 amipython build game.py              # transpile + cross-compile via Docker
 amipython run game.py                # build + launch in Amiberry
 amipython run --no-build game.py     # run existing binary in Amiberry
+amipython run --out build game.py    # keep C/headers/binary/assets in build/ (any command)
 amipython adf game.py                # build + package into bootable game.adf
 amipython adf --run game.py          # build + create ADF + boot in Amiberry
 amipython adf --no-boot game.py      # non-bootable data disk

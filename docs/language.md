@@ -5,14 +5,15 @@ amipython is not full Python. It is a restricted subset sufficient for game logi
 ## Supported Features
 
 - Variables with type annotations (`x: int = 42`)
-- Functions with annotated parameters and return types
+- Functions with annotated parameters and return types — struct and engine-object parameters are passed **by reference**
+- Multi-module programs: `from <mod> import ...` of sibling `.py` files (spliced into one unit)
 - `if`/`elif`/`else`, `while`, `for i in range()`, `for item in list_var`
 - `break`, `continue`, `pass`
 - `global` declarations
 - `print()` with multiple arguments
 - Basic types: `int`, `float`, `bool`, `str`
 - `@dataclass` classes (maps to C structs)
-- `list[T]` typed lists with `.append()`, `.remove()`, `len()`
+- `list[T]` typed lists with `.append()`, `.remove()`, `len()`; sized literals `[0] * N`
 - Arithmetic with Python semantics (floor division, modulo, power)
 - Boolean operators: `and`, `or`, `not`
 - Comparison chaining: `a < b < c`
@@ -28,7 +29,7 @@ amipython is not full Python. It is a restricted subset sufficient for game logi
 | `bool` | `BOOL` | 0 or 1 |
 | `str` | `const char *` | Immutable literals only |
 | `@dataclass class` | `typedef struct` | Fields: int, float, bool only. No methods, no inheritance |
-| `list[T]` | Fixed-capacity array | Max 256 elements. T can be int, float, bool, dataclass, or engine type (Shape, Bitmap, etc.) |
+| `list[T]` | Fixed-capacity array | Capacity 256 by default; `[v] * N` sizes it to N (any size). T can be int, float, bool, str, dataclass, or engine type (Shape, Bitmap, etc.) |
 
 ## Supported Python Builtins
 
@@ -115,10 +116,11 @@ Struct rules:
 - No methods — use standalone functions
 - No inheritance
 - Constructor uses keyword arguments only
+- Structs are passed to functions **by reference** — see [Functions](#functions)
 
 ### Typed Lists
 
-Lists are fixed-capacity (64 elements) typed arrays:
+Lists are fixed-capacity typed arrays (256 elements by default):
 
 ```python
 from dataclasses import dataclass
@@ -155,13 +157,48 @@ n = balls_count;
 ```
 
 List rules:
-- Element type can be `int`, `float`, `bool`, or a `@dataclass` struct
-- Maximum 256 elements per list (trig tables can be larger via `sin_table(n)` / `cos_table(n)`)
+- Element type can be `int`, `float`, `bool`, `str`, a `@dataclass` struct, or an engine type
+- Capacity is 256 by default; a **sized literal** `[v] * N` sets it to N (see below)
 - `for item in list:` gives a pointer for struct lists (mutations persist)
 - `list[idx]` for element read access
 - `list[idx] = value` for in-place mutation (index must be `int`, value must match the element type)
 - `.append(item)` and `.remove(item)` supported
 - `len(list)` returns current count
+
+#### Sized list literals
+
+`[v] * N` creates a list of `N` copies of the literal `v` — the natural way
+to declare grids, lookup tables and save blobs. `N` must be a compile-time
+constant: an int literal, or an expression of module-level int constants
+(names assigned exactly once, at module level, to an int literal):
+
+```python
+MAP_W: int = 40
+MAP_H: int = 32
+
+grid: list[int] = [0] * (MAP_W * MAP_H)   # 1280 ints, all 0, len == 1280
+seen: list[bool] = [False] * (MAP_W * MAP_H)
+names: list[str] = [""] * 64
+weights = [1.5] * 8                       # element type inferred from the literal
+
+grid = [0] * (MAP_W * MAP_H)              # re-assign to reset in place
+```
+
+The C array is sized to `max(256, N)` and the assignment fills the first
+`N` slots and sets the count. Struct lists can't use sized literals — build
+them with `.append()`.
+
+#### String tables
+
+`list[str]` holds string literals — use it for name tables indexed by id:
+
+```python
+ITEM_NAMES: list[str] = [""] * 8
+ITEM_NAMES[0] = "PISTOL"
+ITEM_NAMES[1] = "RIFLE"
+
+bm.print_at(8, 8, ITEM_NAMES[item_id])
+```
 
 #### Using a flat list as a 2D grid
 
@@ -183,6 +220,38 @@ board[y * W + x] = 1
 ```
 
 This is the standard layout for game grids (Tetris wells, tile maps, collision masks).
+
+### Functions
+
+Functions need annotated parameters and (unless `-> None`/omitted) a return
+type. `int`, `float`, `bool` and `str` are passed by value; **structs and
+engine objects are passed by reference** — the C parameter is a pointer, so
+mutations inside the function are visible to the caller, exactly as in
+Python:
+
+```python
+@dataclass
+class Merc:
+    hp: int
+    x: int = 0
+
+def hurt(m: Merc, n: int):
+    m.hp -= n                    # caller's struct is modified
+
+def draw(d: Display, s: Shape, x: int):
+    d.blit(s, x, 10)
+
+m = Merc(hp=10)
+hurt(m, 3)                       # m.hp == 7
+hurt(mercs[0], 1)                # list elements work too
+for e in mercs:
+    hurt(e, 1)                   # loop refs are already pointers
+```
+
+Emitted C: `void hurt(Merc *m, LONG n) { m->hp -= n; }` and `hurt(&m, 3);`.
+Arguments must be addressable — a variable or a list element, not a fresh
+`Merc(...)` constructor call. Functions can't return structs or lists;
+`list[T]` parameters aren't supported (lists are globals).
 
 ### Type Mapping
 
@@ -310,15 +379,23 @@ bm.clear()                              # clear the source drawing
 # From file: load a PNG or IFF image
 ball = Shape.load("data/ball.png")      # PNG converted to .bm at build time
 
-display.blit(ball, x, y)               # blit the shape at runtime
+display.blit(ball, x, y)               # cookie-cut: colour 0 transparent
+display.block(tile, x, y)              # opaque copy: colour 0 drawn (faster)
 ```
 
 Shape rules:
 - Draw the shape on the **display bitmap** (`bm`), not a separate small bitmap
 - Shape width is automatically rounded up to a multiple of 16 (blitter word alignment)
-- Use `display.blit(shape, x, y)` to draw — coordinates must keep the shape within screen bounds
+- `display.blit(shape, x, y)` is a **cookie-cut bob** (Blitz `Blit`): colour 0
+  pixels are transparent, everything else is drawn over the current bitmap.
+  A 1-plane mask is generated when the shape is grabbed/loaded.
+- `display.block(shape, x, y)` is an **opaque copy** (Blitz `Block`): colour 0
+  is drawn too. Cheaper on the blitter — use it for tiles and backdrops that
+  fully cover their cell.
+- Both are clipped to the bitmap (a shape hanging off the left edge is
+  clipped in 16-pixel steps; other edges exactly), so partially off-screen
+  blits are safe on any display height, including 320×256.
 - `Shape.load()` accepts `.png` or `.iff` files — converted to ACE `.bm` format at build time
-- Color index 0 in loaded images is treated as transparent (mask auto-generated)
 
 ### Sprite Sheets
 
@@ -716,6 +793,35 @@ LONG orbit_x_count = 720;
 x = 160 + orbit_x_items[idx];
 ```
 
+## Multi-module programs
+
+A program can be split into several files in the **same directory**. Import
+sibling modules with `from <mod> import name, ...` (or `*`):
+
+```
+game/
+  main.py      from mapgen import gen_floor      ← the file you run / transpile
+  mapgen.py    from state import G, grid
+  state.py     G = Game(...); grid = [0] * N
+```
+
+- `python game/main.py` just works — Python puts `game/` on `sys.path`.
+- `amipython transpile|build|run|adf game/main.py` parses each imported
+  module once, splices its top-level code ahead of the importing module (in
+  dependency order) and emits one C file. Errors report `file:line`.
+- The C output is one namespace: **top-level names must be unique across all
+  modules** (functions, classes, globals).
+- Module top-level statements run inside `main()` before the main file's own
+  statements, in dependency order — put engine setup in `main.py`.
+- A module **may not rebind a name it imported** — no `global X` in a
+  function and no module-level `X = ...` for an imported `X`. Python would
+  make a module-local copy while the C shares one variable, so the two
+  paths would disagree. Keep shared mutable scalars in a `@dataclass` state
+  object (`G.turn += 1`) and mutate lists in place (`grid[i] = v`).
+- Only `from <mod> import ...` — no `import mod`, no aliases, no relative
+  imports, no circular imports. Asset paths stay relative to the main file's
+  directory.
+
 ## Not Supported (by design)
 
 - `dict`, `set`, `frozenset`, `tuple` — too dynamic for 68k static allocation
@@ -723,13 +829,14 @@ x = 160 + orbit_x_items[idx];
 - `bytes`, `bytearray`, `complex` — not needed for game logic
 - String operations (concatenation, slicing, methods) — strings are immutable literals
 - `@dataclass` methods — structs are data-only, use standalone functions
-- Nested lists, `list[list[T]]` — flat structures only
+- Nested lists, `list[list[T]]` — flat structures only (use `[0] * (W * H)` grids)
 - List comprehensions, generator expressions — use explicit for loops
 - Dynamic memory allocation — fixed-capacity arrays, stack structs
 - `*args`, `**kwargs` on user functions
 - Closures, decorators (except `@dataclass`), generators, `yield`
 - `try`/`except`, `with`, `async`/`await`
-- `import` (except `from dataclasses import dataclass` and `from amiga import ...`)
+- `import` (except `from dataclasses import dataclass`, `from amiga import ...` and sibling modules via `from <mod> import ...`)
+- Non-empty list literals other than `[v] * N`
 - `eval()`, `exec()`, `getattr()`, `setattr()`
 - Metaclasses, duck typing
 - Garbage collection — all memory is statically allocated or arena-managed

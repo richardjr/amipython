@@ -38,27 +38,67 @@ def main():
     """amipython — Python-to-Amiga game development toolchain."""
 
 
-@main.command()
-@click.argument("source", type=click.Path(exists=True, path_type=Path))
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Output .c file path (default: same name with .c extension)")
-def transpile(source: Path, output: Path | None):
-    """Transpile a Python file to C89."""
+_OUT_OPTION = click.option(
+    "--out", type=click.Path(file_okay=False, path_type=Path), default=None,
+    help="Directory for generated C, headers, converted assets, binary and "
+         "ADF (default: beside the source file). Created if missing.")
+
+
+def _resolve_out(source: Path, out: Path | None, output: Path | None,
+                 suffix: str) -> tuple[Path, Path]:
+    """Return (c_file, output_path) for a build.
+
+    With --out DIR everything lands in DIR; otherwise beside the source.
+    `suffix` is the default output's suffix ("" = binary, ".adf")."""
+    if out is not None:
+        out.mkdir(parents=True, exist_ok=True)
+        c_file = out / source.with_suffix(".c").name
+        default_output = out / source.with_suffix(suffix).name
+    else:
+        c_file = source.with_suffix(".c")
+        default_output = source.with_suffix(suffix)
+    return c_file, (output if output is not None else default_output)
+
+
+def _transpile_or_exit(source: Path) -> str:
     from amipython.pipeline import transpile as do_transpile
-
-    if output is None:
-        output = source.with_suffix(".c")
-
     try:
-        code = source.read_text()
-        c_code = do_transpile(code, filename=str(source))
+        return do_transpile(source.read_text(), filename=str(source))
     except AmipythonError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
+
+def _build(source: Path, c_file: Path, output: Path):
+    """Transpile, stage runtime + assets beside `c_file`, cross-compile.
+
+    Returns (binary_path, asset_files)."""
+    from amipython.docker import cross_compile
+
+    c_code = _transpile_or_exit(source)
+    c_file.write_text(c_code)
+    _copy_runtime(c_file.parent, c_code)
+    asset_files = _convert_assets(c_code, source.parent, c_file.parent)
+    try:
+        binary = cross_compile(c_file, output, _header_dir())
+    except AmipythonError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    click.echo(f"Built {binary}")
+    return binary, asset_files
+
+
+@main.command()
+@click.argument("source", type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Output .c file path (default: same name with .c extension)")
+@_OUT_OPTION
+def transpile(source: Path, output: Path | None, out: Path | None):
+    """Transpile a Python file to C89."""
+    _, output = _resolve_out(source, out, output, ".c")
+    c_code = _transpile_or_exit(source)
     # Copy runtime files alongside the output
     _copy_runtime(output.parent, c_code)
-
     output.write_text(c_code)
     click.echo(f"Wrote {output}")
 
@@ -67,34 +107,11 @@ def transpile(source: Path, output: Path | None):
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Output binary path (default: source stem without extension)")
-def build(source: Path, output: Path | None):
+@_OUT_OPTION
+def build(source: Path, output: Path | None, out: Path | None):
     """Transpile and cross-compile to an Amiga binary."""
-    from amipython.docker import cross_compile
-    from amipython.pipeline import transpile as do_transpile
-
-    if output is None:
-        output = source.with_suffix("")
-
-    try:
-        code = source.read_text()
-        c_code = do_transpile(code, filename=str(source))
-    except AmipythonError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    c_file = source.with_suffix(".c")
-    c_file.write_text(c_code)
-
-    header_dir = _header_dir()
-    _copy_runtime(c_file.parent, c_code)
-    _convert_assets(c_code, source.parent, c_file.parent)
-
-    try:
-        result = cross_compile(c_file, output, header_dir)
-        click.echo(f"Built {result}")
-    except AmipythonError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    c_file, output = _resolve_out(source, out, output, "")
+    _build(source, c_file, output)
 
 
 @main.command("build-ace-image")
@@ -118,48 +135,26 @@ def build_ace_image():
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Output .adf file path (default: source stem with .adf extension)")
+@_OUT_OPTION
 @click.option("--no-build", is_flag=True, help="Skip build, package existing binary")
 @click.option("--no-boot", is_flag=True, help="Create data-only disk (not bootable)")
 @click.option("--label", type=str, default=None, help="Volume label (default: source stem)")
 @click.option("--run", is_flag=True, help="Launch ADF in Amiberry after creation")
-def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label: str | None, run: bool):
+def adf(source: Path, output: Path | None, out: Path | None, no_build: bool,
+        no_boot: bool, label: str | None, run: bool):
     """Build and package into a bootable ADF floppy image."""
     from amipython.adf import create_adf
 
-    binary = source.with_suffix("")
+    c_file, binary = _resolve_out(source, out, None, "")
+    _, output = _resolve_out(source, out, output, ".adf")
 
     if not no_build:
-        from amipython.docker import cross_compile
-        from amipython.pipeline import transpile as do_transpile
-
-        try:
-            code = source.read_text()
-            c_code = do_transpile(code, filename=str(source))
-        except AmipythonError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
-
-        c_file = source.with_suffix(".c")
-        c_file.write_text(c_code)
-
-        header_dir = _header_dir()
-        _copy_runtime(c_file.parent, c_code)
-        asset_files = _convert_assets(c_code, source.parent, c_file.parent)
-
-        try:
-            binary = cross_compile(c_file, binary, header_dir)
-            click.echo(f"Built {binary}")
-        except AmipythonError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
+        binary, asset_files = _build(source, c_file, binary)
     elif not binary.exists():
         click.echo(f"Error: binary not found: {binary}", err=True)
         sys.exit(1)
     else:
         asset_files = []
-
-    if output is None:
-        output = source.with_suffix(".adf")
 
     try:
         result = create_adf(binary, output, label=label, bootable=not no_boot,
@@ -182,38 +177,16 @@ def adf(source: Path, output: Path | None, no_build: bool, no_boot: bool, label:
 @click.argument("source", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Output binary path (default: source stem without extension)")
+@_OUT_OPTION
 @click.option("--no-build", is_flag=True, help="Skip build, run existing binary")
-def run(source: Path, output: Path | None, no_build: bool):
+def run(source: Path, output: Path | None, out: Path | None, no_build: bool):
     """Build and run in Amiberry."""
     from amipython.amiberry import launch_amiberry
 
-    if output is None:
-        output = source.with_suffix("")
+    c_file, output = _resolve_out(source, out, output, "")
 
     if not no_build:
-        from amipython.docker import cross_compile
-        from amipython.pipeline import transpile as do_transpile
-
-        try:
-            code = source.read_text()
-            c_code = do_transpile(code, filename=str(source))
-        except AmipythonError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
-
-        c_file = source.with_suffix(".c")
-        c_file.write_text(c_code)
-
-        header_dir = _header_dir()
-        _copy_runtime(c_file.parent, c_code)
-        _convert_assets(c_code, source.parent, c_file.parent)
-
-        try:
-            output = cross_compile(c_file, output, header_dir)
-            click.echo(f"Built {output}")
-        except AmipythonError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
+        output, _ = _build(source, c_file, output)
     elif not output.exists():
         click.echo(f"Error: binary not found: {output}", err=True)
         sys.exit(1)

@@ -285,3 +285,92 @@ class TestEngineCallErrors:
     def test_none_return_annotation_accepted(self):
         info = _typecheck("def f() -> None:\n    pass\n")
         assert info.functions["f"].return_type == AmipyType.VOID
+
+
+class TestByRefParams:
+    def test_struct_param_is_ref(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "def hurt(m: Merc, n: int):\n    m.hp -= n\n"
+        )
+        info = _typecheck(src)
+        params = info.functions["hurt"].params
+        assert params[0].is_ref is True
+        assert params[0].struct_name == "Merc"
+        assert params[1].is_ref is False
+
+    def test_engine_param_is_ref(self):
+        src = (
+            "from amiga import Bitmap\n"
+            "def clear(bm: Bitmap):\n    bm.clear()\n"
+        )
+        info = _typecheck(src)
+        assert info.functions["clear"].params[0].is_ref is True
+
+    def test_struct_arg_wrong_struct_rejected(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "@dataclass\nclass Crate:\n    loot: int\n"
+            "def hurt(m: Merc):\n    m.hp -= 1\n"
+            "c = Crate(loot=1)\nhurt(c)\n"
+        )
+        with pytest.raises(TypeCheckError, match="expected struct Merc"):
+            _typecheck(src)
+
+    def test_struct_arg_from_list_element_ok(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "def hurt(m: Merc):\n    m.hp -= 1\n"
+            "mercs: list[Merc] = []\nmercs.append(Merc(hp=5))\nhurt(mercs[0])\n"
+            "def tick():\n    for m in mercs:\n        hurt(m)\n"
+        )
+        _typecheck(src)  # should not raise
+
+    def test_struct_arg_must_be_addressable(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "def hurt(m: Merc):\n    m.hp -= 1\n"
+            "hurt(Merc(hp=5))\n"
+        )
+        with pytest.raises(TypeCheckError, match="by reference"):
+            _typecheck(src)
+
+
+class TestSizedListLiteral:
+    def test_capacity_from_literal(self):
+        info = _typecheck("grid: list[int] = [0] * 1280\n")
+        var = info.globals["grid"]
+        assert var.type == AmipyType.LIST
+        assert var.list_element_type == AmipyType.INT
+        assert var.list_capacity == 1280
+
+    def test_capacity_from_module_constants(self):
+        info = _typecheck("W: int = 40\nH: int = 32\ngrid: list[bool] = [False] * (W * H)\n")
+        assert info.const_ints == {"W": 40, "H": 32}
+        assert info.globals["grid"].list_capacity == 1280
+        assert info.globals["grid"].list_element_type == AmipyType.BOOL
+
+    def test_unannotated_infers_element_type(self):
+        info = _typecheck('names = [""] * 64\nweights = [1.5] * 8\n')
+        assert info.globals["names"].list_element_type == AmipyType.STR
+        assert info.globals["weights"].list_element_type == AmipyType.FLOAT
+        # capacity never shrinks below the default
+        assert info.globals["names"].list_capacity == 256
+
+    def test_rebound_constant_is_not_a_size(self):
+        # W is assigned twice, so it is not a compile-time constant
+        with pytest.raises(TypeCheckError):
+            _typecheck("W: int = 40\nW = 50\ngrid: list[int] = [0] * W\n")
+
+    def test_element_type_mismatch(self):
+        with pytest.raises(TypeCheckError, match="does not match"):
+            _typecheck('grid: list[int] = ["x"] * 4\n')
+
+    def test_struct_sized_literal_rejected(self):
+        src = STRUCT_PREAMBLE + "@dataclass\nclass B:\n    x: int\nbs: list[B] = [0] * 4\n"
+        with pytest.raises(TypeCheckError):
+            _typecheck(src)
+
+    def test_local_sized_list(self):
+        info = _typecheck("def f():\n    tmp: list[int] = [0] * 300\n    tmp[5] = 1\n")
+        assert info.locals["f"]["tmp"].list_capacity == 300

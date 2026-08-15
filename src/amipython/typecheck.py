@@ -17,6 +17,7 @@ from amipython.types import (
     StructInfo,
     TypeInfo,
     VariableInfo,
+    is_ref_param_type,
 )
 
 
@@ -59,8 +60,99 @@ def _resolve_annotation(
     )
 
 
+def _collect_const_ints(tree: ast.Module, info: TypeInfo):
+    """Record module-level names bound exactly once, at module level, to an
+    int literal (or an int constant expression). These are compile-time
+    constants for array sizes: `grid: list[int] = [0] * (W * H)`."""
+    assign_counts: dict[str, int] = {}
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, (ast.Assign,)):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        elif isinstance(node, ast.For):
+            targets = [node.target]
+        for t in targets:
+            if isinstance(t, ast.Name):
+                assign_counts[t.id] = assign_counts.get(t.id, 0) + 1
+    for node in tree.body:
+        name = None
+        value = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            name, value = node.target.id, node.value
+        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name, value = node.targets[0].id, node.value
+        if name is None or value is None or assign_counts.get(name) != 1:
+            continue
+        folded = const_int(value, info.const_ints)
+        if folded is not None:
+            info.const_ints[name] = folded
+
+
+def const_int(node: ast.expr, consts: dict[str, int]) -> int | None:
+    """Fold an int constant expression (literals, known constant names,
+    + - * // %, unary minus, parentheses). None if not constant."""
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, int):
+            return None
+        return node.value
+    if isinstance(node, ast.Name):
+        return consts.get(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = const_int(node.operand, consts)
+        return None if v is None else -v
+    if isinstance(node, ast.BinOp):
+        a = const_int(node.left, consts)
+        b = const_int(node.right, consts)
+        if a is None or b is None:
+            return None
+        if isinstance(node.op, ast.Add):
+            return a + b
+        if isinstance(node.op, ast.Sub):
+            return a - b
+        if isinstance(node.op, ast.Mult):
+            return a * b
+        if isinstance(node.op, ast.FloorDiv) and b != 0:
+            return a // b
+        if isinstance(node.op, ast.Mod) and b != 0:
+            return a % b
+    return None
+
+
+def sized_list_literal(
+    node: ast.expr, consts: dict[str, int]
+) -> tuple[ast.Constant, int] | None:
+    """Match `[v] * N` / `N * [v]` where v is a literal and N folds to a
+    positive int. Returns (value_node, count) or None."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult)):
+        return None
+    lst, count_node = node.left, node.right
+    if not isinstance(lst, ast.List):
+        lst, count_node = node.right, node.left
+    if not (isinstance(lst, ast.List) and len(lst.elts) == 1):
+        return None
+    value = lst.elts[0]
+    # `[-1] * N` — Python parses -1 as UnaryOp(USub, Constant 1); fold it
+    if (isinstance(value, ast.UnaryOp) and isinstance(value.op, ast.USub)
+            and isinstance(value.operand, ast.Constant)
+            and isinstance(value.operand.value, (int, float))
+            and not isinstance(value.operand.value, bool)):
+        folded = ast.Constant(value=-value.operand.value)
+        ast.copy_location(folded, value)
+        value = folded
+    if not isinstance(value, ast.Constant):
+        return None
+    n = const_int(count_node, consts)
+    if n is None or n <= 0:
+        return None
+    return value, n
+
+
 def _pass1(tree: ast.Module, info: TypeInfo):
     """Collect structs, function signatures, global annotated assignments, and engine imports."""
+    _collect_const_ints(tree, info)
     # First pass: collect struct definitions so they can be used in annotations
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -134,7 +226,13 @@ def _collect_function(node: ast.FunctionDef, info: TypeInfo):
                 f"use a global list instead",
                 lineno=node.lineno,
             )
-        params.append(VariableInfo(arg.arg, param_type, struct_name=struct_name))
+        # Structs and engine objects are passed by reference: the C param is
+        # a pointer, field access uses `->`, and mutations inside the
+        # function are visible to the caller (matches Python semantics).
+        params.append(VariableInfo(
+            arg.arg, param_type, struct_name=struct_name,
+            is_ref=is_ref_param_type(param_type),
+        ))
 
     return_type = AmipyType.VOID
     if node.returns is not None:
@@ -252,6 +350,34 @@ class _TypeChecker(ast.NodeVisitor):
         for name in node.names:
             self.global_names.add(name)
 
+    def _sized_list_literal(self, node: ast.expr):
+        return sized_list_literal(node, self.info.const_ints)
+
+    def _apply_sized_list(self, name: str, node: ast.expr, lineno: int | None):
+        """Record capacity for a `[v] * N` assignment to list `name`."""
+        matched = self._sized_list_literal(node)
+        if matched is None:
+            return
+        value_node, count = matched
+        var = self._get_var(name, lineno=lineno)
+        if var is None:
+            return
+        elem = _literal_type(value_node)
+        target_elem = var.list_element_type or elem
+        if elem != target_elem and not _can_promote(elem, target_elem):
+            raise TypeCheckError(
+                f"list literal element type {elem.name} does not match "
+                f"list[{target_elem.name}]",
+                lineno=lineno,
+            )
+        if var.list_element_type == AmipyType.STRUCT:
+            raise TypeCheckError(
+                "sized list literals are for int/float/bool/str lists — "
+                "build struct lists with .append()",
+                lineno=lineno,
+            )
+        var.list_capacity = max(var.list_capacity, count)
+
     def visit_AnnAssign(self, node: ast.AnnAssign):
         if not isinstance(node.target, ast.Name):
             return
@@ -281,6 +407,8 @@ class _TypeChecker(ast.NodeVisitor):
             list_element_type=elem_type,
             list_element_struct=elem_struct,
         )
+        if node.value is not None and var_type == AmipyType.LIST:
+            self._apply_sized_list(node.target.id, node.value, node.lineno)
 
     def visit_Assign(self, node: ast.Assign):
         val_type = self._infer(node.value)
@@ -335,6 +463,14 @@ class _TypeChecker(ast.NodeVisitor):
                     if var:
                         var.list_capacity = capacity
                         var.list_init_values = init_values
+                elif val_type == AmipyType.LIST and self._sized_list_literal(node.value):
+                    # Sized literal: grid = [0] * N — element type from the literal
+                    value_node, _ = self._sized_list_literal(node.value)
+                    self._set_var(
+                        target.id, AmipyType.LIST, lineno=node.lineno,
+                        list_element_type=_literal_type(value_node),
+                    )
+                    self._apply_sized_list(target.id, node.value, node.lineno)
                 else:
                     self._set_var(target.id, val_type, lineno=node.lineno)
             elif isinstance(target, ast.Attribute):
@@ -484,9 +620,14 @@ class _TypeChecker(ast.NodeVisitor):
                     f"variable '{node.id}' used before assignment",
                     lineno=node.lineno,
                 )
+            if var.type == AmipyType.STRUCT and var.struct_name:
+                self.info.expr_struct_names[id(node)] = var.struct_name
             return var.type
 
         if isinstance(node, ast.BinOp):
+            if self._sized_list_literal(node) is not None:
+                # `[v] * N` — sized list literal (capacity + fill)
+                return AmipyType.LIST
             left = self._infer(node.left)
             right = self._infer(node.right)
             return _arithmetic_result(left, right, node.op)
@@ -522,7 +663,8 @@ class _TypeChecker(ast.NodeVisitor):
             if len(node.elts) == 0:
                 return AmipyType.LIST
             raise TypeCheckError(
-                "only empty list literals are supported (use .append())",
+                "only empty list literals `[]` and sized literals `[v] * N` "
+                "are supported (use .append() to build lists)",
                 lineno=getattr(node, "lineno", None),
             )
 
@@ -644,6 +786,22 @@ class _TypeChecker(ast.NodeVisitor):
                             f"expected {param.type.name}, got {arg_type.name}",
                             lineno=node.lineno,
                         )
+                    if param.type == AmipyType.STRUCT:
+                        arg_struct = self.info.expr_struct_names.get(id(arg))
+                        if arg_struct != param.struct_name:
+                            raise TypeCheckError(
+                                f"argument type mismatch for '{param.name}': "
+                                f"expected struct {param.struct_name}, got "
+                                f"{arg_struct or 'a non-struct value'}",
+                                lineno=node.lineno,
+                            )
+                        if not _is_addressable(arg):
+                            raise TypeCheckError(
+                                f"argument '{param.name}' must be a struct "
+                                f"variable or list element (structs are passed "
+                                f"by reference)",
+                                lineno=node.lineno,
+                            )
                 return func.return_type
             raise TypeCheckError(
                 f"unknown function '{name}'", lineno=node.lineno
@@ -1025,6 +1183,8 @@ class _TypeChecker(ast.NodeVisitor):
             if var and var.type == AmipyType.LIST:
                 self._infer(node.slice)
                 elem_type = var.list_element_type or AmipyType.INT
+                if elem_type == AmipyType.STRUCT and var.list_element_struct:
+                    self.info.expr_struct_names[id(node)] = var.list_element_struct
                 return elem_type
         raise TypeCheckError(
             "subscript access is only supported on list variables",
@@ -1068,6 +1228,13 @@ class _TypeChecker(ast.NodeVisitor):
                 f"field type mismatch: expected {field_type.name}, got {val_type.name}",
                 lineno=lineno,
             )
+
+
+def _is_addressable(node: ast.expr) -> bool:
+    """True for expressions that denote storage (a variable or a list element)."""
+    if isinstance(node, ast.Name):
+        return True
+    return isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
 
 
 def _literal_type(node: ast.Constant) -> AmipyType:

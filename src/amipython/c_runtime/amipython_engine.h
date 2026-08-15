@@ -155,7 +155,10 @@ typedef struct {
 
 void amipython_display_init(AmipyDisplay *d, LONG w, LONG h, LONG bp);
 void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm);
+/* Cookie-cut bob: colour 0 transparent (mask from grab/load); clipped. */
 void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y);
+/* Opaque rectangle copy (colour 0 drawn); clipped. Cheaper — use for tiles. */
+void amipython_display_block(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y);
 void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp);
 void amipython_bitmap_circle_filled(AmipyBitmap *bm, LONG cx, LONG cy, LONG r, LONG color);
 void amipython_bitmap_box_filled(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);

@@ -817,3 +817,64 @@ for i in range(2):
 print(total)
 ''')
         assert output.strip() == "14"
+
+
+class TestByRefParams:
+    def test_struct_mutated_through_function(self):
+        output = _compile_and_run('''
+from dataclasses import dataclass
+
+@dataclass
+class Merc:
+    hp: int
+    x: int = 0
+
+def hurt(m: Merc, n: int):
+    m.hp -= n
+
+def move(m: Merc, dx: int) -> int:
+    m.x += dx
+    return m.x
+
+mercs: list[Merc] = []
+mercs.append(Merc(hp=10))
+mercs.append(Merc(hp=20))
+
+m = Merc(hp=30)
+hurt(m, 3)
+hurt(mercs[1], 5)
+for e in mercs:
+    hurt(e, 1)
+print("m.hp =", m.hp)
+print("m0 =", mercs[0].hp, "m1 =", mercs[1].hp)
+print("x =", move(m, 4), move(m, 4))
+''')
+        assert "m.hp = 27" in output
+        assert "m0 = 9 m1 = 14" in output
+        assert "x = 4 8" in output
+
+
+class TestSizedListLiteral:
+    def test_grid_fill_and_len(self):
+        output = _compile_and_run('''
+W: int = 40
+H: int = 32
+grid: list[int] = [0] * (W * H)
+seen: list[bool] = [False] * (W * H)
+names: list[str] = [""] * 4
+
+grid[5 * W + 3] = 2
+seen[1279] = True
+names[1] = "RIFLE"
+total: int = 0
+for v in grid:
+    total += v
+print("len =", len(grid), len(seen), len(names))
+print("total =", total)
+print("seen =", seen[1279], seen[0])
+print("name =", names[1])
+''')
+        assert "len = 1280 1280 4" in output
+        assert "total = 2" in output
+        assert "seen = 1 0" in output  # host stub prints bools as %d
+        assert "name = RIFLE" in output

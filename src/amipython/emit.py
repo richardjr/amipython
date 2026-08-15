@@ -5,6 +5,7 @@ import re
 
 from amipython.engine import BUILTINS, KEY_CONSTANTS, MODULE_TYPES, OBJECT_TYPES
 from amipython.errors import EmitError
+from amipython.typecheck import sized_list_literal
 from amipython.types import (
     C_TYPE_MAP,
     ENGINE_TYPE_MAP,
@@ -405,6 +406,37 @@ class _Emitter:
             return f"{c_type}{name}"
         return f"{c_type} {name}"
 
+    def _param_decl(self, p: VariableInfo) -> str:
+        """Format a function parameter — structs and engine objects are
+        passed by reference (pointer), everything else by value."""
+        if p.type == AmipyType.STRUCT and p.struct_name:
+            return f"{p.struct_name} *{p.name}"
+        if self._is_engine_object_type(p.type):
+            return f"{C_TYPE_MAP[p.type]} *{p.name}"
+        return self._var_decl(p.type, p.name)
+
+    def _is_ref_name(self, node: ast.expr) -> bool:
+        """True if `node` names a variable that is already a pointer
+        (by-ref parameter or list-loop variable)."""
+        if not isinstance(node, ast.Name):
+            return False
+        var = self._get_var_info(node.id)
+        return bool(var and var.is_ref)
+
+    def _addr(self, node: ast.expr, expr_str: str) -> str:
+        """Address of a struct / engine-object expression: `&x`,
+        `&xs_items[i]`, or just `p` when `p` is already a pointer."""
+        if self._is_ref_name(node):
+            return expr_str
+        return f"&{expr_str}"
+
+    def _obj_addr(self, name: str) -> str:
+        """Address of the engine object named `name` for a method call."""
+        var = self._get_var_info(name)
+        if var and var.is_ref:
+            return name
+        return f"&{name}"
+
     def _expr_type(self, node: ast.expr) -> AmipyType:
         t = self.info.expr_types.get(id(node))
         if t is None:
@@ -511,9 +543,7 @@ class _Emitter:
 
     def _emit_forward_decl(self, node: ast.FunctionDef):
         func = self.info.functions[node.name]
-        params = ", ".join(
-            self._var_decl(p.type, p.name) for p in func.params
-        )
+        params = ", ".join(self._param_decl(p) for p in func.params)
         if not params:
             params = "void"
         self._line(f"{self._type_str(func.return_type)} {node.name}({params});")
@@ -592,9 +622,7 @@ class _Emitter:
     def _emit_function(self, node: ast.FunctionDef):
         self._current_function = node.name
         func = self.info.functions[node.name]
-        params = ", ".join(
-            self._var_decl(p.type, p.name) for p in func.params
-        )
+        params = ", ".join(self._param_decl(p) for p in func.params)
         if not params:
             params = "void"
         self._line(f"{self._type_str(func.return_type)} {node.name}({params}) {{")
@@ -798,6 +826,9 @@ class _Emitter:
                     and isinstance(node.value.func, ast.Name)
                     and node.value.func.id in ("sin_table", "cos_table")):
                 return
+            # Sized list literal: grid = [0] * N  ->  fill N slots, count = N
+            if self._emit_sized_list_fill(target.id, node.value):
+                return
             val = self._emit_expr(node.value)
             self._line(f"{target.id} = {val};")
         elif isinstance(target, ast.Attribute):
@@ -811,6 +842,23 @@ class _Emitter:
             lhs = self._emit_subscript(target)
             self._line(f"{lhs} = {val};")
 
+    def _emit_sized_list_fill(self, name: str, value: ast.expr) -> bool:
+        """Emit the fill for `name = [v] * N`. Returns False if `value` is
+        not a sized list literal."""
+        matched = sized_list_literal(value, self.info.const_ints)
+        if matched is None:
+            return False
+        value_node, count = matched
+        fill = self._emit_constant(value_node)
+        self._line("{")
+        self.indent += 1
+        self._line("LONG _fi;")
+        self._line(f"for (_fi = 0; _fi < {count}; _fi++) {name}_items[_fi] = {fill};")
+        self.indent -= 1
+        self._line("}")
+        self._line(f"{name}_count = {count};")
+        return True
+
     def _emit_ann_assign(self, node: ast.AnnAssign):
         if isinstance(node.target, ast.Name) and node.value is not None:
             # Skip empty list literal — declaration handles it
@@ -819,6 +867,8 @@ class _Emitter:
                 var = self._get_var_info(node.target.id)
                 if var and var.type == AmipyType.LIST:
                     self._line(f"{node.target.id}_count = 0;")
+                return
+            if self._emit_sized_list_fill(node.target.id, node.value):
                 return
             # Delegate to the plain-assign path so annotated assignments get
             # the same engine-constructor / static-method / struct / trig
@@ -994,7 +1044,7 @@ class _Emitter:
         for i, arg in enumerate(call.args):
             expr = self._emit_expr(arg)
             if i < len(ctor.positional) and ctor.positional[i].type in _OBJECT_PARAM_TYPES:
-                args.append(f"&{expr}")
+                args.append(self._addr(arg, expr))
             else:
                 args.append(expr)
         # Tilemap constructor: first arg is tileset path — embed tileset data
@@ -1143,9 +1193,9 @@ class _Emitter:
         args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
-            self._line(f"{method.c_name}(&{obj_name}, {args});")
+            self._line(f"{method.c_name}({self._obj_addr(obj_name)}, {args});")
         else:
-            self._line(f"{method.c_name}(&{obj_name});")
+            self._line(f"{method.c_name}({self._obj_addr(obj_name)});")
 
     def _emit_shuffle(self, call: ast.Call):
         """Emit shuffle(lst) as amipython_shuffle(lst_items, lst_count)."""
@@ -1226,7 +1276,7 @@ class _Emitter:
                     lineno=call.lineno,
                 )
         args = ", ".join(leading_args + [color, str(n)] + pieces)
-        self._line(f"{c_func}(&{obj_name}, {args});")
+        self._line(f"{c_func}({self._obj_addr(obj_name)}, {args});")
 
     def _emit_print_at_multi(self, call: ast.Call, obj_name: str):
         """Emit print_at with >1 text arg using amipython_bitmap_print_at_multi."""
@@ -1254,7 +1304,7 @@ class _Emitter:
                     lineno=call.lineno,
                 )
         self._line(
-            f"amipython_bitmap_print_at_multi(&{obj_name}, {x}, {y}, {color}, "
+            f"amipython_bitmap_print_at_multi({self._obj_addr(obj_name)}, {x}, {y}, {color}, "
             f"{n}, {', '.join(pieces)});"
         )
 
@@ -1326,6 +1376,9 @@ class _Emitter:
                     )
             else:
                 val = self._emit_expr(arg)
+                if self._is_ref_name(arg):
+                    # Appending a by-ref struct/engine object copies the value
+                    val = f"*{val}"
                 self._line(f"{list_name}_items[{list_name}_count] = {val};")
                 self._line(f"{list_name}_count++;")
             return
@@ -1673,8 +1726,8 @@ class _Emitter:
                 if name == "rnd" and len(node.args) == 2:
                     return f"amipython_rnd_range({args})"
                 return f"{builtin.c_name}({args})"
-            # User function call
-            args = ", ".join(self._emit_expr(a) for a in node.args)
+            # User function call — struct / engine-object args go by address
+            args = ", ".join(self._emit_arg(a) for a in node.args)
             return f"{name}({args})"
         if isinstance(node.func, ast.Attribute):
             return self._emit_method_call_expr(node)
@@ -1725,8 +1778,8 @@ class _Emitter:
         args_strs = self._resolve_method_kwargs(call, method)
         args = ", ".join(args_strs)
         if args:
-            return f"{method.c_name}(&{obj_name}, {args})"
-        return f"{method.c_name}(&{obj_name})"
+            return f"{method.c_name}({self._obj_addr(obj_name)}, {args})"
+        return f"{method.c_name}({self._obj_addr(obj_name)})"
 
     def _get_var_info(self, name: str) -> VariableInfo | None:
         # Current function scope first (params + locals), then globals.
@@ -1772,9 +1825,10 @@ class _Emitter:
         self._line("}")
 
     def _emit_arg(self, node: ast.expr) -> str:
-        """Emit an argument, adding & for engine object references."""
+        """Emit an argument — struct and engine-object values are passed by
+        address (`&x` / `&xs_items[i]`), refs (params, loop vars) as-is."""
         expr_str = self._emit_expr(node)
         t = self._expr_type(node)
-        if self._is_engine_object_type(t):
-            return f"&{expr_str}"
+        if self._is_engine_object_type(t) or t == AmipyType.STRUCT:
+            return self._addr(node, expr_str)
         return expr_str

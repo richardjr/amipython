@@ -651,3 +651,34 @@ def test_joy_button_pressed_per_port(monkeypatch):
     held[1] = True
     assert j.button_pressed(0) is False  # port 0 already latched
     assert j.button_pressed(1) is True
+
+
+def test_display_blit_is_cookie_cut_and_block_is_opaque():
+    """display.blit leaves the background where the shape is colour 0;
+    display.block overwrites it. Both are clipped at the bitmap edges."""
+    from amiga._display import Display
+    from amiga._bitmap import Bitmap
+    from amiga._shape import Shape
+
+    d = Display(320, 256, bitplanes=4)
+    bm = Bitmap(320, 256, bitplanes=4)
+    # Shape: 16x16, colour 3 in the top-left 8x8 only, rest colour 0
+    bm.box_filled(0, 0, 7, 7, 3)
+    shape = Shape.grab(bm, 0, 0, 16, 16)
+    bm.clear()
+    d.show(bm)
+
+    # Background: colour 5 rectangle
+    bm.box_filled(100, 100, 131, 131, 5)
+    d.blit(shape, 100, 100)
+    assert bm._surface.get_at_mapped((100, 100)) == 3     # shape pixel drawn
+    assert bm._surface.get_at_mapped((110, 110)) == 5     # colour-0 pixel transparent
+
+    d.block(shape, 116, 116)
+    assert bm._surface.get_at_mapped((116, 116)) == 3
+    assert bm._surface.get_at_mapped((126, 126)) == 0     # opaque: colour 0 drawn
+
+    # Bottom-edge blit on a 256-line display must not raise (clipped)
+    d.blit(shape, 300, 250)
+    d.block(shape, -8, 250)
+    assert bm._surface.get_at_mapped((300, 250)) == 3

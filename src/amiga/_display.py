@@ -29,9 +29,28 @@ class Display:
         backend.present(bm._surface)
 
     def blit(self, shape, x: int, y: int) -> None:
-        """Blit a shape onto the current display bitmap at (x, y)."""
+        """Cookie-cut blit: draw `shape` at (x, y) with colour 0 transparent.
+
+        Mirrors the C runtime's masked blit (Blitz `Blit`). Clipped to the
+        bitmap by pygame.
+        """
         if self._bm is not None:
-            self._bm._surface.blit(shape._surface, (int(x), int(y)))
+            src = shape._surface
+            old_key = src.get_colorkey()
+            src.set_colorkey(0)
+            self._bm._surface.blit(src, (int(x), int(y)))
+            src.set_colorkey(old_key)
+            Backend.get().present(self._bm._surface)
+
+    def block(self, shape, x: int, y: int) -> None:
+        """Opaque blit: copy `shape` at (x, y) including colour 0 (Blitz
+        `Block`). Cheaper on the Amiga — use for tiles / backdrops."""
+        if self._bm is not None:
+            src = shape._surface
+            old_key = src.get_colorkey()
+            src.set_colorkey(None)
+            self._bm._surface.blit(src, (int(x), int(y)))
+            src.set_colorkey(old_key)
             Backend.get().present(self._bm._surface)
 
     def sprites_behind(self, *, from_channel: int = 4) -> None:

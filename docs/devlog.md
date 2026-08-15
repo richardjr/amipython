@@ -2,6 +2,73 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2026-08-15: Phase 6 Stage 0 — multi-module, sized lists, by-ref params, --out, masked blits
+
+Driven by a much larger game than the examples (see the vault: amipython ADR
+0004). Everything below landed together (386 tests, +22; Docker vbcc + ACE
+paths re-verified; Amiberry runs of a 320×256 blit stress).
+
+**Transpiler:**
+- **Multi-module programs** (`modules.py`). `from <mod> import a, b` / `*` of a
+  sibling `.py` is parsed once and spliced ahead of the importer in
+  dependency order; the local import statement is dropped; the C is one unit.
+  Enforced: unique top-level names across modules, no rebinding of an
+  imported name (`global X` or module-level `X = ...` — Python would make a
+  module-local copy while the C shares one variable), imported names must
+  exist, no aliases / plain `import` / relative / circular imports. Each
+  module's AST is `ast.increment_lineno`'d by 1,000,000 × index so any later
+  error's `lineno` decodes to `file:line` (`AmipythonError` gained `filename`
+  and `with_location()`; `pipeline.transpile` does the decode).
+- **Sized list literals** `xs: list[int] = [0] * N` (also `[""] * N`,
+  `[False] * N`, `[1.5] * N`, and unannotated). `N` is const-folded from int
+  literals and module-level int constants (`_collect_const_ints`: names bound
+  exactly once, at module level, to an int constant expression; recorded on
+  `TypeInfo.const_ints`). Sets `list_capacity = max(256, N)` and emits a fill
+  loop + `count = N` at the assignment site, so `[0] * (W * H)` grids and
+  re-assignment-to-reset both work. Struct lists still use `.append()`.
+- **`list[str]`** turned out to work already (`const char *x_items[N]`); now
+  documented and tested as string/name tables.
+- **Struct and engine-object parameters by reference.** Struct params used to
+  crash the emitter (`KeyError: STRUCT` in `_var_decl`); engine-object params
+  were passed by value. Both now emit pointer params (`Merc *m`,
+  `AmipyBitmap *b`), `is_ref=True` locals (so `->` field access and
+  `_obj_addr` method calls just work), and call sites pass `&x` /
+  `&xs_items[i]` — or the pointer itself for loop refs and params
+  (`_emit_arg` → `_addr`). Typecheck verifies the struct *name* matches and
+  the argument is addressable (no `hurt(Merc(...))`). Side fix: `for s in
+  shapes: display.blit(s, ...)` used to emit `&s` for an already-pointer loop
+  var.
+
+**CLI:** `--out DIR` on transpile/build/run/adf — generated C, headers,
+converted assets, binary and .adf land in DIR (Amiberry mounts it as `Run:`).
+Build/run/adf share one `_build()` helper. Docker containers now run as the
+invoking user (`--user uid:gid`), so build outputs are user-owned and the
+CMake build tree can actually be removed (it used to be left root-owned).
+
+**C runtime:**
+- **`display.blit` is now a cookie-cut bob** (colour 0 transparent via the
+  shape's 1-plane mask, `blitCopyMask`) — the docs always claimed this but the
+  runtime and preview were opaque copies. New **`display.block`** is the
+  opaque copy (Blitz `Block`), cheaper and right for tiles. Both **clip** to
+  the bitmap (vertical exact; a shape hanging off the left edge is clipped in
+  16-px steps because the blitter's mask/source pointers must stay
+  word-aligned; right edge exact). Preview mirrors via `set_colorkey(0)`.
+- **`shape_grab` built the mask on the CPU before the blitter had finished
+  copying the shape** — no `blitWait()` between `blitCopy` and
+  `_generateShapeMask`. Masks were never used by `display.blit` before, so it
+  went unnoticed. Fixed.
+- **The old "display height 256 crashes bobs near y≈220" note is resolved**: it
+  was an unclipped blit past the bottom of the framebuffer. A 320×256 stress
+  (42 masked + opaque 16×16 blits per frame, positions from −12 to the far
+  edges, 4 bpl) runs at full 50 fps for minutes on Amiberry with the clipping
+  in place. Lesson learnt writing that test: random cookie-cut rings *accumulate*
+  — after a few thousand blits the screen is a solid block of ring colour, which
+  looks exactly like a corruption bug and isn't one.
+
+**Docs/examples:** `docs/language.md` (Functions, sized lists, string tables,
+Multi-module programs, blit/block), `examples/basic/multi_module/` (three
+modules exercising all of the above on a 320×256 display).
+
 ## 2026-08-14: Hardening round — silent wrong-C emission and C-runtime robustness
 
 A code-review sweep found four ways the transpiler emitted wrong C with no

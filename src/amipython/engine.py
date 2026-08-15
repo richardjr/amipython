@@ -97,6 +97,16 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 ],
                 return_type=AmipyType.VOID,
             ),
+            "block": EngineMethod(
+                name="block",
+                c_name="amipython_display_block",
+                params=[
+                    EngineParam("shape", AmipyType.SHAPE),
+                    EngineParam("x", AmipyType.INT),
+                    EngineParam("y", AmipyType.INT),
+                ],
+                return_type=AmipyType.VOID,
+            ),
             "sprites_behind": EngineMethod(
                 name="sprites_behind",
                 c_name="amipython_display_sprites_behind",

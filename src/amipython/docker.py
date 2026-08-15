@@ -5,6 +5,7 @@ Two build paths:
 - GCC+ACE: Engine programs (display, sprites, etc.). Requires ACE game engine.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -92,6 +93,15 @@ def cross_compile(
     return _cross_compile_vbcc(c_file, output, header_dir, c_content)
 
 
+def _user_args() -> list[str]:
+    """Run the container as the invoking user so files written into the
+    mounted work dir (binary, CMake build tree) are user-owned and the
+    build-tree cleanup can actually delete them."""
+    if hasattr(os, "getuid"):
+        return ["--user", f"{os.getuid()}:{os.getgid()}"]
+    return []
+
+
 def _cross_compile_vbcc(
     c_file: Path,
     output: Path,
@@ -112,7 +122,7 @@ def _cross_compile_vbcc(
     source_files = [c_name]
 
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", *_user_args(),
         "-v", f"{work_dir}:/opt/code",
         "-w", "/opt/code",
         VBCC_IMAGE,
@@ -175,7 +185,7 @@ def _cross_compile_ace(
     )
 
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", *_user_args(),
         "-v", f"{work_dir}:/opt/code",
         ACE_IMAGE,
         "bash", "-c", cmake_configure,

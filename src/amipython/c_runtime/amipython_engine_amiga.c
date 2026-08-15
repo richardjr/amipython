@@ -295,18 +295,74 @@ static void _flushPendingPalette(AmipyDisplay *d) {
 static void _dirtyReset(AmipyBitmap *bm);
 static void _dirtyExpand(AmipyBitmap *bm, WORD x1, WORD y1, WORD x2, WORD y2);
 
+/* Clip a shape blit against the active bitmap. Vertical clipping is exact;
+ * a shape hanging off the LEFT edge is clipped at 16-pixel granularity
+ * (the blitter's mask/source pointers must stay word-aligned), off the
+ * RIGHT edge exactly. Returns 0 if nothing is visible. */
+static int _clipShapeBlit(AmipyShape *shape, LONG x, LONG y,
+                          WORD *srcX, WORD *srcY, WORD *dstX, WORD *dstY,
+                          WORD *w, WORD *h) {
+    LONG bw = s_pActiveBitmap->width;
+    LONG bh = s_pActiveBitmap->height;
+    LONG sx = 0, sy = 0, cw = shape->width, ch = shape->height;
+    if (x >= bw || y >= bh || x + cw <= 0 || y + ch <= 0) return 0;
+    if (y < 0) { sy = -y; ch -= sy; y = 0; }
+    if (y + ch > bh) ch = bh - y;
+    if (x < 0) {
+        sx = (-x + 15) & ~15;            /* word-aligned source column */
+        if (sx >= cw) return 0;
+        cw -= sx;
+        x += sx;
+    }
+    if (x + cw > bw) cw = bw - x;
+    if (cw <= 0 || ch <= 0) return 0;
+    *srcX = (WORD)sx; *srcY = (WORD)sy;
+    *dstX = (WORD)x;  *dstY = (WORD)y;
+    *w = (WORD)cw;    *h = (WORD)ch;
+    return 1;
+}
+
+/* display.blit — cookie-cut bob: colour 0 pixels are transparent (mask
+ * generated at grab/load time). Falls back to an opaque copy if the shape
+ * has no mask. */
 void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
-    if (s_pActiveBitmap && s_pActiveBitmap->pBitmap && shape->pBitmap) {
+    WORD sx, sy, dx, dy, w, h;
+    if (s_pActiveBitmap && s_pActiveBitmap->pBitmap && shape->pBitmap
+            && _clipShapeBlit(shape, x, y, &sx, &sy, &dx, &dy, &w, &h)) {
+        blitWait();
+        if (shape->pMask) {
+            blitCopyMask(
+                shape->pBitmap, sx, sy,
+                s_pActiveBitmap->pBitmap, dx, dy,
+                w, h, (const UBYTE *)shape->pMask
+            );
+        } else {
+            blitCopy(
+                shape->pBitmap, sx, sy,
+                s_pActiveBitmap->pBitmap, dx, dy,
+                w, h, MINTERM_COOKIE
+            );
+        }
+        _dirtyExpand(s_pActiveBitmap, dx, dy,
+                     (WORD)(dx + w - 1), (WORD)(dy + h - 1));
+    }
+    (void)d;
+}
+
+/* display.block — opaque rectangle copy (no mask; colour 0 is drawn).
+ * Cheaper than blit: use for tiles / backdrops that cover their cell. */
+void amipython_display_block(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
+    WORD sx, sy, dx, dy, w, h;
+    if (s_pActiveBitmap && s_pActiveBitmap->pBitmap && shape->pBitmap
+            && _clipShapeBlit(shape, x, y, &sx, &sy, &dx, &dy, &w, &h)) {
         blitWait();
         blitCopy(
-            shape->pBitmap, 0, 0,
-            s_pActiveBitmap->pBitmap, (WORD)x, (WORD)y,
-            shape->width, shape->height,
-            MINTERM_COOKIE
+            shape->pBitmap, sx, sy,
+            s_pActiveBitmap->pBitmap, dx, dy,
+            w, h, MINTERM_COOKIE
         );
-        _dirtyExpand(s_pActiveBitmap, (WORD)x, (WORD)y,
-                     (WORD)(x + (LONG)shape->width - 1),
-                     (WORD)(y + (LONG)shape->height - 1));
+        _dirtyExpand(s_pActiveBitmap, dx, dy,
+                     (WORD)(dx + w - 1), (WORD)(dy + h - 1));
     }
     (void)d;
 }
@@ -755,6 +811,9 @@ void amipython_shape_grab(AmipyShape *shape, AmipyBitmap *bm, LONG x, LONG y, LO
             uw, uh,
             MINTERM_COOKIE
         );
+        /* The mask is built by the CPU from the copied planes — wait for
+         * the blitter to finish writing them first. */
+        blitWait();
         shape->pMask = _generateShapeMask(shape->pBitmap, uw, uh, bm->bitplanes);
     }
 }
@@ -2338,6 +2397,19 @@ void amipython_display_show(AmipyDisplay *d, AmipyBitmap *bm) {
 
 void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
     amipython_print_str("[display] blit ");
+    _print_uword(shape->width);
+    amipython_print_str("x");
+    _print_uword(shape->height);
+    amipython_print_str(" at ");
+    amipython_print_long(x);
+    amipython_print_str(",");
+    amipython_print_long(y);
+    amipython_print_str("\n");
+    (void)d;
+}
+
+void amipython_display_block(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
+    amipython_print_str("[display] block ");
     _print_uword(shape->width);
     amipython_print_str("x");
     _print_uword(shape->height);

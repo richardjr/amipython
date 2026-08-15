@@ -27,6 +27,10 @@ void amipython_display_blit(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) 
     printf("[display] blit %ux%u at %ld,%ld\n", shape->width, shape->height, x, y);
 }
 
+void amipython_display_block(AmipyDisplay *d, AmipyShape *shape, LONG x, LONG y) {
+    printf("[display] block %ux%u at %ld,%ld\n", shape->width, shape->height, x, y);
+}
+
 void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
     bm->width = (UWORD)w;
     bm->height = (UWORD)h;

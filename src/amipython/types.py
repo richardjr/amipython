@@ -54,6 +54,19 @@ ENGINE_TYPE_MAP: dict[str, AmipyType] = {
     "DualPlayfield": AmipyType.DUAL_PLAYFIELD,
 }
 
+# Engine object types — values that live in C structs and are always
+# passed around by pointer (function params, list-loop refs).
+ENGINE_OBJECT_TYPES: frozenset[AmipyType] = frozenset(ENGINE_TYPE_MAP.values())
+
+
+def is_engine_object_type(t: AmipyType) -> bool:
+    return t in ENGINE_OBJECT_TYPES
+
+
+def is_ref_param_type(t: AmipyType) -> bool:
+    """Struct and engine-object parameters are passed by reference (C pointer)."""
+    return t == AmipyType.STRUCT or t in ENGINE_OBJECT_TYPES
+
 @dataclass
 class StructField:
     name: str
@@ -107,3 +120,6 @@ class TypeInfo:
     expr_struct_names: dict[int, str] = field(default_factory=dict)
     # Expression list element info: ast node id -> (element_type, element_struct)
     expr_list_info: dict[int, tuple[AmipyType, str | None]] = field(default_factory=dict)
+    # Module-level int constants (`W: int = 40`, assigned exactly once, never
+    # rebound) — usable in compile-time sizes such as `[0] * (W * H)`
+    const_ints: dict[str, int] = field(default_factory=dict)

@@ -260,3 +260,90 @@ class TestList:
         )
         c = _emit(src)
         assert "board_items[((y * 10) + x)] = 1;" in c
+
+
+class TestByRefParams:
+    def test_struct_param_pointer_signature_and_call(self):
+        c = _emit(STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "def hurt(m: Merc, n: int):\n    m.hp -= n\n"
+            "m = Merc(hp=10)\nhurt(m, 3)\n"
+        ))
+        assert "void hurt(Merc *m, LONG n);" in c
+        assert "m->hp -= n;" in c
+        assert "hurt(&m, 3);" in c
+
+    def test_loop_ref_and_list_element_args(self):
+        c = _emit(STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "def hurt(m: Merc):\n    m.hp -= 1\n"
+            "mercs: list[Merc] = []\nmercs.append(Merc(hp=5))\nhurt(mercs[0])\n"
+            "def tick():\n    for m in mercs:\n        hurt(m)\n"
+        ))
+        assert "hurt(&mercs_items[0]);" in c
+        assert "hurt(m);" in c          # loop var is already a pointer
+
+    def test_engine_object_param(self):
+        c = _emit(
+            "from amiga import Display, Bitmap, Shape\n"
+            "display = Display(320, 200)\nbm = Bitmap(320, 200)\n"
+            "bm.box_filled(0, 0, 15, 15, 1)\ns = Shape.grab(bm, 0, 0, 16, 16)\n"
+            "def draw(d: Display, sh: Shape, x: int):\n    d.blit(sh, x, 10)\n"
+            "def wipe(b: Bitmap):\n    b.clear()\n"
+            "draw(display, s, 5)\nwipe(bm)\n"
+        )
+        assert "void draw(AmipyDisplay *d, AmipyShape *sh, LONG x)" in c
+        assert "amipython_display_blit(d, sh, x, 10);" in c
+        assert "void wipe(AmipyBitmap *b)" in c
+        assert "amipython_bitmap_clear(b);" in c
+        assert "draw(&display, &s, 5);" in c
+        assert "wipe(&bm);" in c
+
+    def test_shape_loop_ref_passed_to_blit(self):
+        c = _emit(
+            "from amiga import Display, Bitmap, Shape\n"
+            "display = Display(320, 200)\nbm = Bitmap(320, 200)\n"
+            "shapes: list[Shape] = []\nshapes.append(Shape.grab(bm, 0, 0, 16, 16))\n"
+            "for s in shapes:\n    display.blit(s, 1, 2)\n"
+        )
+        assert "amipython_display_blit(&display, s, 1, 2);" in c
+
+
+class TestSizedListLiteral:
+    def test_global_fill_and_capacity(self):
+        c = _emit("W: int = 4\nH: int = 3\ngrid: list[int] = [0] * (W * H)\ngrid[5] = 2\n")
+        assert "LONG grid_items[256];" in c   # capacity never shrinks below default
+        assert "for (_fi = 0; _fi < 12; _fi++) grid_items[_fi] = 0;" in c
+        assert "grid_count = 12;" in c
+
+    def test_large_capacity(self):
+        c = _emit("grid: list[int] = [0] * 1280\n")
+        assert "LONG grid_items[1280];" in c
+        assert "grid_count = 1280;" in c
+
+    def test_str_and_bool_and_float_fills(self):
+        c = _emit('names: list[str] = [""] * 4\nseen = [False] * 4\nws = [1.5] * 2\n')
+        assert 'names_items[_fi] = "";' in c
+        assert "seen_items[_fi] = FALSE;" in c
+        assert "ws_items[_fi] = 1.5f;" in c
+
+    def test_reassign_inside_function(self):
+        c = _emit("grid: list[int] = [0] * 8\ndef reset():\n    global grid\n    grid = [7] * 8\n")
+        assert "grid_items[_fi] = 7;" in c
+
+
+class TestDisplayBlock:
+    def test_block_emits_display_block(self):
+        c = _emit(
+            "from amiga import Display, Bitmap, Shape\n"
+            "display = Display(320, 256)\nbm = Bitmap(320, 256)\n"
+            "s = Shape.grab(bm, 0, 0, 16, 16)\n"
+            "display.blit(s, 1, 2)\ndisplay.block(s, 3, 4)\n"
+        )
+        assert "amipython_display_blit(&display, &s, 1, 2);" in c
+        assert "amipython_display_block(&display, &s, 3, 4);" in c
+
+    def test_negative_fill(self):
+        c = _emit("drawn: list[int] = [-1] * 4\n")
+        assert "drawn_items[_fi] = -1;" in c
+        assert "drawn_count = 4;" in c

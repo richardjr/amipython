@@ -212,6 +212,7 @@ amipython transpile game.py          # Python → C
 amipython build game.py              # Python → C → Amiga binary (via Docker)
 amipython run game.py                # build + launch in Amiberry
 amipython run --no-build game.py     # run existing binary in Amiberry
+amipython run --out build game.py    # keep C/headers/binary/assets in build/ (any command)
 
 # Floppy disk image
 amipython adf game.py                # build + create bootable 880KB ADF
@@ -231,7 +232,7 @@ amipython build-ace-image            # build the ACE Docker image (one-time)
 |---|---|
 | **amitetris** | Complete Tetris game — scenes, scoring, MOD music, SFX, persistent high scores |
 | **amifish** | Fishing game — hardware sprites, sprite-vs-sprite collision, copper gradient |
-| **basic** | Minimal display, palette bars, grid pattern, score display, 7-bag shuffle |
+| **basic** | Minimal display, palette bars, grid pattern, score display, 7-bag shuffle, `multi_module/` (sibling modules, sized lists, by-ref params, 320×256 blits) |
 | **drawing** | Random circles, mouse lines (polygons: aspirational) |
 | **animation** | Bouncing ball (float + int variants), blits, orbiting ball, 3D vector stars |
 | **sprites** | Hardware sprites, priority, collision |
