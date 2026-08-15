@@ -682,3 +682,20 @@ def test_display_blit_is_cookie_cut_and_block_is_opaque():
     d.blit(shape, 300, 250)
     d.block(shape, -8, 250)
     assert bm._surface.get_at_mapped((300, 250)) == 3
+
+
+def test_font_covers_printable_punctuation():
+    """The preview and C fonts must have real glyphs for the punctuation game
+    UIs use (cursor '>', apostrophes, etc.)."""
+    from amiga._bitmap import _FONT_8X8
+    for ch in "<>'@$%&;:!\"#()*+,-./=?":
+        assert any(_FONT_8X8[ch]), f"blank glyph for {ch!r}"
+    # ...and the C table agrees glyph-for-glyph on those characters
+    import re
+    from pathlib import Path
+    c_src = (Path(__file__).resolve().parent.parent / "src/amipython/c_runtime/amipython_engine_amiga.c").read_text()
+    for ch in "<>'@$%&;":
+        m = re.search(r"/\* 0x%02X '.' \*/ \{([^}]*)\}" % ord(ch), c_src)
+        assert m, ch
+        c_bytes = [int(x, 16) for x in m.group(1).split(",")]
+        assert c_bytes == _FONT_8X8[ch], ch

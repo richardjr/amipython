@@ -69,6 +69,10 @@ CMake build tree can actually be removed (it used to be left root-owned).
 Multi-module programs, blit/block), `examples/basic/multi_module/` (three
 modules exercising all of the above on a 320×256 display).
 
+**Font gap (2026-08-15):** the built-in 8×8 font had blank glyphs for `< > ' ; @ $ % &`
+(a menu cursor `>` and apostrophes rendered as nothing on the Amiga; the
+preview font lacked them too). Filled in both, with a parity test.
+
 **Same-day follow-ups from the game's Stage 1:** struct field defaults may be
 module-level int constants (`hp: int = PLAYER_HP` — folded by `const_int`);
 `xs[i].field = v` / `-= v` on struct lists type-checks (the emitter already
