@@ -185,9 +185,13 @@ def _collect_struct(node: ast.ClassDef, info: TypeInfo):
             if item.value is not None:
                 if isinstance(item.value, ast.Constant):
                     default = item.value.value
+                elif field_type == AmipyType.INT and const_int(item.value, info.const_ints) is not None:
+                    # module-level int constant (or constant expression)
+                    default = const_int(item.value, info.const_ints)
                 else:
                     raise TypeCheckError(
-                        f"struct field default must be a literal",
+                        f"struct field default must be a literal or a "
+                        f"module-level int constant",
                         lineno=item.lineno,
                     )
             fields.append(StructField(item.target.id, field_type, default))
@@ -1192,7 +1196,28 @@ class _TypeChecker(ast.NodeVisitor):
         )
 
     def _resolve_field_type(self, node: ast.Attribute) -> AmipyType:
-        """Resolve a struct field's type from an attribute node."""
+        """Resolve a struct field's type from an attribute node — `s.f` on a
+        struct variable or `xs[i].f` on a struct list element."""
+        if (isinstance(node.value, ast.Subscript)
+                and isinstance(node.value.value, ast.Name)):
+            list_var = self._get_var(node.value.value.id, lineno=node.lineno)
+            if (list_var and list_var.type == AmipyType.LIST
+                    and list_var.list_element_struct):
+                idx_type = self._infer(node.value.slice)
+                if idx_type != AmipyType.INT:
+                    raise TypeCheckError(
+                        "list index must be an int", lineno=node.lineno
+                    )
+                struct = self.info.structs.get(list_var.list_element_struct)
+                if struct:
+                    for field in struct.fields:
+                        if field.name == node.attr:
+                            return field.type
+                    raise TypeCheckError(
+                        f"struct '{list_var.list_element_struct}' has no field "
+                        f"'{node.attr}'",
+                        lineno=node.lineno,
+                    )
         if not isinstance(node.value, ast.Name):
             raise TypeCheckError(
                 "only simple field access is supported", lineno=node.lineno

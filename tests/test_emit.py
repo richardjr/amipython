@@ -347,3 +347,14 @@ class TestDisplayBlock:
         c = _emit("drawn: list[int] = [-1] * 4\n")
         assert "drawn_items[_fi] = -1;" in c
         assert "drawn_count = 4;" in c
+
+
+class TestListElementFieldAssign:
+    def test_emits_items_index_field(self):
+        c = _emit(STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "mercs: list[Merc] = []\nmercs.append(Merc(hp=5))\n"
+            "mercs[0].hp = 7\nmercs[0].hp -= 2\n"
+        ))
+        assert "mercs_items[0].hp = 7;" in c
+        assert "mercs_items[0].hp -= 2;" in c

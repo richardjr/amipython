@@ -374,3 +374,41 @@ class TestSizedListLiteral:
     def test_local_sized_list(self):
         info = _typecheck("def f():\n    tmp: list[int] = [0] * 300\n    tmp[5] = 1\n")
         assert info.locals["f"]["tmp"].list_capacity == 300
+
+
+class TestStructConstDefaults:
+    def test_int_field_default_from_module_constant(self):
+        src = STRUCT_PREAMBLE + (
+            "MAX_HP: int = 20\n"
+            "@dataclass\nclass Merc:\n    hp: int = MAX_HP\n    lives: int = -1\n    x: int = MAX_HP // 2\n"
+            "m = Merc()\n"
+        )
+        info = _typecheck(src)
+        fields = {f.name: f.default for f in info.structs["Merc"].fields}
+        assert fields == {"hp": 20, "lives": -1, "x": 10}
+
+    def test_non_constant_default_rejected(self):
+        src = STRUCT_PREAMBLE + (
+            "hp0: int = 20\nhp0 = 30\n"
+            "@dataclass\nclass Merc:\n    hp: int = hp0\n"
+        )
+        with pytest.raises(TypeCheckError, match="module-level int constant"):
+            _typecheck(src)
+
+
+class TestListElementFieldAssign:
+    def test_assign_and_augassign_to_list_element_field(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n    alive: bool = True\n"
+            "mercs: list[Merc] = []\nmercs.append(Merc(hp=5))\n"
+            "mercs[0].hp = 7\nmercs[0].hp -= 2\nmercs[0].alive = False\n"
+        )
+        _typecheck(src)  # should not raise
+
+    def test_wrong_type_rejected(self):
+        src = STRUCT_PREAMBLE + (
+            "@dataclass\nclass Merc:\n    hp: int\n"
+            "mercs: list[Merc] = []\nmercs.append(Merc(hp=5))\nmercs[0].hp = 1.5\n"
+        )
+        with pytest.raises(TypeCheckError, match="field type mismatch"):
+            _typecheck(src)

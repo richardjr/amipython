@@ -69,6 +69,12 @@ CMake build tree can actually be removed (it used to be left root-owned).
 Multi-module programs, blit/block), `examples/basic/multi_module/` (three
 modules exercising all of the above on a 320×256 display).
 
+**Same-day follow-ups from the game's Stage 1:** struct field defaults may be
+module-level int constants (`hp: int = PLAYER_HP` — folded by `const_int`);
+`xs[i].field = v` / `-= v` on struct lists type-checks (the emitter already
+handled the target); `[-1] * N` sized literals (Python parses `-1` as a
+UnaryOp — folded to a Constant in `sized_list_literal`).
+
 ## 2026-08-14: Hardening round — silent wrong-C emission and C-runtime robustness
 
 A code-review sweep found four ways the transpiler emitted wrong C with no

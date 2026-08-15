@@ -113,6 +113,8 @@ b.x += 0.5f;
 
 Struct rules:
 - Fields must be `int`, `float`, or `bool`
+- Field defaults are literals, or (for `int` fields) module-level int
+  constants / constant expressions: `hp: int = MAX_HP`, `lives: int = -1`
 - No methods — use standalone functions
 - No inheritance
 - Constructor uses keyword arguments only
@@ -162,6 +164,7 @@ List rules:
 - `for item in list:` gives a pointer for struct lists (mutations persist)
 - `list[idx]` for element read access
 - `list[idx] = value` for in-place mutation (index must be `int`, value must match the element type)
+- `list[idx].field` read / write / augmented-assign on struct lists (`mercs[i].hp -= 2`)
 - `.append(item)` and `.remove(item)` supported
 - `len(list)` returns current count
 
