@@ -358,3 +358,20 @@ class TestListElementFieldAssign:
         ))
         assert "mercs_items[0].hp = 7;" in c
         assert "mercs_items[0].hp -= 2;" in c
+
+
+class TestStorageListExpression:
+    def test_load_int_list_in_expression_position(self):
+        c = _emit(
+            "from amiga import storage\n"
+            "blob: list[int] = [0] * 300\n"
+            "def load() -> bool:\n"
+            "    if not storage.load_int_list(\"save\", blob):\n"
+            "        return False\n"
+            "    return True\n"
+            "ok: bool = storage.load_int_list(\"save\", blob)\n"
+            "storage.save_int_list(\"save\", blob)\n"
+        )
+        assert 'amipython_storage_load_int_list("save", blob_items, &blob_count, 300)' in c
+        assert 'amipython_storage_save_int_list("save", blob_items, blob_count);' in c
+        assert c.count("blob_items, &blob_count, 300") == 2

@@ -1216,8 +1216,14 @@ class _Emitter:
         self._line(f"amipython_shuffle({list_name}_items, {list_name}_count);")
 
     def _emit_storage_list_call(self, call: ast.Call, method_name: str):
-        """Emit storage.save_int_list / storage.load_int_list — the list arg
-        expands to `<name>_items, <name>_count` (or `&<name>_count`, capacity)."""
+        """Statement form of storage.save_int_list / load_int_list."""
+        self._line(self._storage_list_call_expr(call, method_name) + ";")
+
+    def _storage_list_call_expr(self, call: ast.Call, method_name: str) -> str:
+        """storage.save_int_list / storage.load_int_list as a C expression —
+        the list arg expands to `<name>_items, <name>_count` (or
+        `&<name>_count`, capacity). Shared by statement and expression
+        positions so `if storage.load_int_list(...)` works too."""
         if len(call.args) != 2:
             raise EmitError(
                 f"storage.{method_name}() takes exactly 2 args (name, list)",
@@ -1237,15 +1243,10 @@ class _Emitter:
                 f"'{list_name}' is not a list", lineno=call.lineno
             )
         if method_name == "save_int_list":
-            self._line(
-                f"amipython_storage_save_int_list({name_arg}, "
-                f"{list_name}_items, {list_name}_count);"
-            )
-        else:  # load_int_list
-            self._line(
-                f"amipython_storage_load_int_list({name_arg}, "
-                f"{list_name}_items, &{list_name}_count, {var.list_capacity});"
-            )
+            return (f"amipython_storage_save_int_list({name_arg}, "
+                    f"{list_name}_items, {list_name}_count)")
+        return (f"amipython_storage_load_int_list({name_arg}, "
+                f"{list_name}_items, &{list_name}_count, {var.list_capacity})")
 
     def _emit_print_variadic(self, call: ast.Call, obj_name: str,
                                 c_func: str, leading: int):
@@ -1756,6 +1757,10 @@ class _Emitter:
         if obj_name in self.info.engine_modules:
             mod = MODULE_TYPES[obj_name]
             func = mod.functions[method_name]
+            if obj_name == "storage" and method_name in (
+                "save_int_list", "load_int_list",
+            ):
+                return self._storage_list_call_expr(call, method_name)
             args_strs = self._resolve_method_kwargs(call, func)
             args = ", ".join(args_strs)
             return f"{func.c_name}({args})"
