@@ -26,6 +26,9 @@ K_1 = 0x01; K_2 = 0x02; K_3 = 0x03; K_4 = 0x04; K_5 = 0x05
 K_6 = 0x06; K_7 = 0x07; K_8 = 0x08; K_9 = 0x09; K_0 = 0x0A
 K_LEFT = 0x4F; K_RIGHT = 0x4E; K_UP = 0x4C; K_DOWN = 0x4D
 K_SPACE = 0x40; K_RETURN = 0x44; K_ESC = 0x45
+K_TAB = 0x42; K_BACKSPACE = 0x41; K_DEL = 0x46; K_HELP = 0x5F
+K_F1 = 0x50; K_F2 = 0x51; K_F3 = 0x52; K_F4 = 0x53; K_F5 = 0x54
+K_F6 = 0x55; K_F7 = 0x56; K_F8 = 0x57; K_F9 = 0x58; K_F10 = 0x59
 
 
 def _amiga_to_pygame_map():
@@ -45,6 +48,11 @@ def _amiga_to_pygame_map():
         K_LEFT: pygame.K_LEFT, K_RIGHT: pygame.K_RIGHT,
         K_UP: pygame.K_UP, K_DOWN: pygame.K_DOWN,
         K_SPACE: pygame.K_SPACE, K_RETURN: pygame.K_RETURN, K_ESC: pygame.K_ESCAPE,
+        K_TAB: pygame.K_TAB, K_BACKSPACE: pygame.K_BACKSPACE, K_DEL: pygame.K_DELETE,
+        K_HELP: pygame.K_INSERT,   # no Help key on PC keyboards — Insert stands in
+        K_F1: pygame.K_F1, K_F2: pygame.K_F2, K_F3: pygame.K_F3, K_F4: pygame.K_F4,
+        K_F5: pygame.K_F5, K_F6: pygame.K_F6, K_F7: pygame.K_F7, K_F8: pygame.K_F8,
+        K_F9: pygame.K_F9, K_F10: pygame.K_F10,
     }
 
 

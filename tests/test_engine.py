@@ -544,3 +544,15 @@ class TestListOfEngineTypes:
             "display.blit(shapes[bars[i].level], 0, 0)\n"
         )
         assert "shapes_items[bars_items[i].level]" in c
+
+
+def test_key_constants_match_preview_module():
+    """Every K_* the transpiler knows is importable from the preview with the
+    same raw code, and vice versa."""
+    import amiga
+    from amipython.engine import KEY_CONSTANTS
+    for name, code in KEY_CONSTANTS.items():
+        assert getattr(amiga, name) == code, name
+    preview_keys = {n for n in dir(amiga) if n.startswith("K_")}
+    assert preview_keys == set(KEY_CONSTANTS)
+    assert KEY_CONSTANTS["K_F1"] == 0x50 and KEY_CONSTANTS["K_F10"] == 0x59

@@ -755,6 +755,10 @@ KEY_CONSTANTS: dict[str, int] = {
     # Navigation / special
     "K_LEFT": 0x4F, "K_RIGHT": 0x4E, "K_UP": 0x4C, "K_DOWN": 0x4D,
     "K_SPACE": 0x40, "K_RETURN": 0x44, "K_ESC": 0x45,
+    "K_TAB": 0x42, "K_BACKSPACE": 0x41, "K_DEL": 0x46, "K_HELP": 0x5F,
+    # Function keys
+    "K_F1": 0x50, "K_F2": 0x51, "K_F3": 0x52, "K_F4": 0x53, "K_F5": 0x54,
+    "K_F6": 0x55, "K_F7": 0x56, "K_F8": 0x57, "K_F9": 0x58, "K_F10": 0x59,
 }
 
 

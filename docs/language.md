@@ -731,6 +731,8 @@ from amiga import (
     K_N, K_O, K_P, K_Q, K_R, K_S, K_T, K_U, K_V, K_W, K_X, K_Y, K_Z,
     K_0, K_1, K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9,
     K_LEFT, K_RIGHT, K_UP, K_DOWN, K_SPACE, K_RETURN, K_ESC,
+    K_TAB, K_BACKSPACE, K_DEL, K_HELP,
+    K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10,
 )
 
 if key.pressed(K_SPACE):          # True while held
@@ -742,7 +744,8 @@ if key.just_released(K_ESC):      # True once per release (edge down)
 ```
 
 The `K_*` constants are Amiga raw-key codes — they transpile to `#define`
-lines in the generated C (matching ACE's `KEY_*` codes). Only import the
+lines in the generated C (matching ACE's `KEY_*` codes). In the preview,
+`K_HELP` is mapped to Insert (PC keyboards have no Help key). Only import the
 ones your program actually references; unused constants are not emitted.
 
 Use `just_pressed` for menu selection, rotate, pause, commit. Use `pressed`

@@ -32,6 +32,8 @@ from amiga._key import (
     K_N, K_O, K_P, K_Q, K_R, K_S, K_T, K_U, K_V, K_W, K_X, K_Y, K_Z,
     K_0, K_1, K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9,
     K_LEFT, K_RIGHT, K_UP, K_DOWN, K_SPACE, K_RETURN, K_ESC,
+    K_TAB, K_BACKSPACE, K_DEL, K_HELP,
+    K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10,
 )
 from amiga._builtins import wait_mouse, vwait, rnd, run, sin_table, cos_table, int_to_str, shuffle
 from amiga._copper import copper, Color
@@ -57,6 +59,8 @@ __all__ = [
     "K_0", "K_1", "K_2", "K_3", "K_4", "K_5", "K_6", "K_7", "K_8", "K_9",
     "K_LEFT", "K_RIGHT", "K_UP", "K_DOWN",
     "K_SPACE", "K_RETURN", "K_ESC",
+    "K_TAB", "K_BACKSPACE", "K_DEL", "K_HELP",
+    "K_F1", "K_F2", "K_F3", "K_F4", "K_F5", "K_F6", "K_F7", "K_F8", "K_F9", "K_F10",
     "wait_mouse",
     "vwait",
     "rnd",
