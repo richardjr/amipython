@@ -192,3 +192,21 @@ class TestErrors:
     def test_local_import_needs_real_path(self):
         with pytest.raises(ValidationError, match="unknown module"):
             transpile("from a import x\n")
+
+
+def test_used_but_not_imported_name_is_rejected(tmp_path):
+    src, fn = _write(tmp_path, {
+        "tables.py": "LIMIT: int = 5\nOTHER: int = 1\n",
+        "main.py": "from tables import OTHER\nprint(LIMIT)\n",
+    })
+    with pytest.raises(ValidationError, match="'LIMIT' is used but not imported") as ei:
+        transpile(src, fn)
+    assert ei.value.filename.endswith("main.py") and ei.value.lineno == 2
+
+
+def test_local_shadowing_is_not_flagged(tmp_path):
+    src, fn = _write(tmp_path, {
+        "tables.py": "dist: int = 5\n",
+        "main.py": "def f(dist: int) -> int:\n    total: int = dist\n    return total\nprint(f(2))\n",
+    })
+    transpile(src, fn)   # `dist` is a parameter here — fine

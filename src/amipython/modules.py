@@ -73,6 +73,20 @@ def _top_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
+def _locally_bound_names(tree: ast.Module) -> set[str]:
+    """Names bound anywhere inside the module (function params, locals, loop
+    variables, ...) — these legitimately shadow other modules' globals."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            names.add(node.name)
+    return names
+
+
 def _local_module_path(source_dir: Path | None, module: str) -> Path | None:
     if source_dir is None or "." in module:
         return None
@@ -206,6 +220,24 @@ def load_program(source: str, filename: str) -> ast.Module:
                     f"all modules (the C output is a single namespace)",
                 )
             owner[name] = mod
+    # A module may only use another module's top-level names if it imported
+    # them. The spliced C would compile regardless (one namespace) but Python
+    # raises NameError when that code path runs — catch it at transpile time.
+    for mod in order:
+        local_names = _locally_bound_names(mod.tree)
+        for node in ast.walk(mod.tree):
+            if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+                continue
+            name = node.id
+            if name in mod.defined_names or name in mod.imported_names or name in local_names:
+                continue
+            other = owner.get(name)
+            if other is not None and other is not mod:
+                raise ValidationError(
+                    f"'{name}' is used but not imported — add "
+                    f"'from {other.name} import {name}'",
+                    lineno=node.lineno, filename=mod.display_name,
+                )
 
     # --- splice ---------------------------------------------------------------
     body: list[ast.stmt] = []
