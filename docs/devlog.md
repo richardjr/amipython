@@ -17,6 +17,11 @@ had a second, duplicated glyph loop in `print_at` that ignored the font; it now
 shares `_render_pieces` (a refactor briefly ate `Bitmap.load`'s
 `@staticmethod` — regression test added).
 
+**Write-protected saves.** `storage.save_*` now asks `Info()` for PROGDIR:'s
+`id_DiskState` first and silently skips the write when the volume is
+write-protected — closes the 2026-04-27 TODO (the ADF flow was verified
+booting a game to its title screen).
+
 **Storage hang.** `storage.exists/load/save` call dos.library. Every previous
 game did that *before* `display.show()`; a title screen that probes for a
 save file *after* the display is up (i.e. after ACE's `systemUnuse()`) hung

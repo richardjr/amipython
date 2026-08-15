@@ -1841,6 +1841,29 @@ static void _store_path(const char *name, char *out, LONG out_len) {
     out[i] = 0;
 }
 
+/* Is PROGDIR: on a writable volume? Saving onto a write-protected floppy
+ * (the normal state of a real disk, and Amiberry's default for a read-only
+ * ADF) used to hang the game — DOS wants to put up a requester ACE can't
+ * show. Ask first: Lock() + Info() → id_DiskState. Anything but an explicit
+ * write-protected answer is treated as writable (Open() then fails cleanly
+ * on odd volumes rather than hanging on the common case). */
+static BOOL _progdir_writable(void) {
+    struct InfoData *pInfo;
+    BPTR lock;
+    BOOL ok = TRUE;
+    lock = Lock((CONST_STRPTR)"PROGDIR:", ACCESS_READ);
+    if (!lock) return TRUE;
+    pInfo = (struct InfoData *)AllocMem(sizeof(struct InfoData), MEMF_PUBLIC | MEMF_CLEAR);
+    if (pInfo) {
+        if (Info(lock, pInfo) && pInfo->id_DiskState == ID_WRITE_PROTECTED) {
+            ok = FALSE;
+        }
+        FreeMem(pInfo, sizeof(struct InfoData));
+    }
+    UnLock(lock);
+    return ok;
+}
+
 static void _be32(UBYTE *p, ULONG v) {
     p[0] = (UBYTE)((v >> 24) & 0xFF); p[1] = (UBYTE)((v >> 16) & 0xFF);
     p[2] = (UBYTE)((v >> 8) & 0xFF);  p[3] = (UBYTE)(v & 0xFF);
@@ -1871,6 +1894,10 @@ void amipython_storage_save_int_list(const char *name, const LONG *items, LONG c
     APTR old;
     _store_path(name, path, sizeof(path));
     old = _silence_dos_requesters();
+    if (!_progdir_writable()) {
+        _restore_dos_requesters(old);      /* write-protected: silently skip */
+        return;
+    }
     f = Open(path, MODE_NEWFILE);
     if (!f) {
         _restore_dos_requesters(old);
@@ -1928,6 +1955,7 @@ void amipython_storage_save_str(const char *name, const char *value) {
     for (p = value; *p; p++) len++;
     if (len > 0xFFFF) len = 0xFFFF;
     old = _silence_dos_requesters();
+    if (!_progdir_writable()) { _restore_dos_requesters(old); return; }
     f = Open(path, MODE_NEWFILE);
     if (!f) { _restore_dos_requesters(old); return; }
     header[0]='A'; header[1]='M'; header[2]='P'; header[3]='Y';
