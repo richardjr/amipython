@@ -101,7 +101,8 @@ src/
   amiga/                          # Python preview module (pygame-ce)
     __init__.py                   # Public API exports — what `from amiga import ...` resolves to
     _backend.py                   # Pygame singleton (window, palette, events, 50fps clock, sprite/tilemap registry)
-    _bitmap.py                    # Bitmap with 8-bit indexed surface, drawing primitives, Bitmap.load()
+    _bitmap.py                    # Bitmap with 8-bit indexed surface, drawing primitives, Bitmap.load(), font(6|8)
+    _font6.py                     # Condensed 6x8 font glyphs — source of truth for the C table (scripts/gen_font6.py)
     _display.py                   # Display — lazy window on show(), blit, sprites_behind
     _palette.py                   # OCS 12-bit palette emulation (.aga / .set / .fade)
     _shape.py                     # Shape — grab/load, transparent index 0 for blits
@@ -141,6 +142,7 @@ docs/                             # Documentation
   architecture.md                 # Build system, cross-compilation paths, design decisions, prior art
   credits.md                      # Acknowledgements for ACE, ptplayer, GCC/vbcc, demo MOD/logo assets
   devlog.md                       # Dated technical notes — problems hit, root causes, and solutions
+scripts/                          # gen_font6.py — regenerates the C 6x8 font table from src/amiga/_font6.py
 docker/                           # Docker build files
   Dockerfile.ace                  # Bebbo's GCC + ACE engine image (`amipython-ace`)
   patch_ace.py                    # Patches ACE source: removes `_ace_dbg`, guards `_WBenchMsg` NULL deref

@@ -6,6 +6,7 @@ import inspect
 from pathlib import Path
 
 from amiga._backend import Backend, _require_pygame
+from amiga._font6 import FONT_6X8 as _FONT_6X8
 
 try:
     import pygame
@@ -26,6 +27,7 @@ class Bitmap:
         self.height = height
         self.bitplanes = bitplanes
         self._max_colors = 1 << bitplanes
+        self._font_w = 8
         self._surface = pygame.Surface((width, height), depth=8)
         self._surface.fill(0)
         Backend.get().register_surface(self._surface)
@@ -77,39 +79,51 @@ class Bitmap:
             self._surface.blit(src._surface, (rect.x, rect.y),
                                area=(rect.x, rect.y, rect.w, rect.h))
 
+    def font(self, width: int) -> None:
+        """Select the text font for subsequent print_* calls: 8 = built-in
+        8x8 (default), 6 = condensed 6x8 (5x7 glyphs, 53 columns on 320px).
+        Mirrors `amipython_bitmap_font`."""
+        self._font_w = 6 if width == 6 else 8
+
+    def _glyphs(self):
+        return _FONT_6X8 if self._font_w == 6 else _FONT_8X8
+
     def _render_pieces(self, cx: int, y: int, pieces, color: int) -> None:
         """Internal: render a sequence of text pieces at the given cursor x."""
+        gw = self._font_w
+        table = self._glyphs()
         for i, piece in enumerate(pieces):
             if isinstance(piece, bool):
                 text = "True" if piece else "False"
             else:
                 text = str(piece)
             for ch in text:
-                glyph = _FONT_8X8.get(ch) or _FONT_8X8.get(' ')
+                glyph = table.get(ch) or table.get(' ')
                 if glyph:
                     for row in range(8):
                         bits = glyph[row]
-                        for col in range(8):
+                        for col in range(gw):
                             bx, by = cx + col, y + row
                             if 0 <= bx < self.width and 0 <= by < self.height:
                                 if bits & (0x80 >> col):
                                     self._surface.set_at((bx, by), color)
                                 else:
                                     self._surface.set_at((bx, by), 0)
-                cx += 8
+                cx += gw
             if i + 1 < len(pieces):
-                cx += 8
+                cx += gw
 
     def _pieces_width(self, pieces) -> int:
         total = 0
+        gw = self._font_w
         for i, piece in enumerate(pieces):
             if isinstance(piece, bool):
                 text = "True" if piece else "False"
             else:
                 text = str(piece)
-            total += len(text) * 8
+            total += len(text) * gw
             if i + 1 < len(pieces):
-                total += 8
+                total += gw
         return total
 
     def print_centered(self, y: int, *texts, color: int = 1) -> None:
@@ -131,35 +145,12 @@ class Bitmap:
 
         Accepts any number of positional text args (str/int/bool). Non-str args
         are converted via `str()` — matches transpiled `amipython_str_int` /
-        `amipython_str_bool` behaviour.
+        `amipython_str_bool` behaviour. Uses the bitmap's current font
+        (see `font()`), like the C runtime.
         """
         if not texts:
             return
-        cx = x
-        for i, piece in enumerate(texts):
-            if isinstance(piece, bool):
-                text = "True" if piece else "False"
-            elif isinstance(piece, (int, float)):
-                text = str(piece)
-            else:
-                text = str(piece)
-            for ch in text:
-                glyph = _FONT_8X8.get(ch)
-                if glyph is None:
-                    glyph = _FONT_8X8.get(' ')
-                if glyph:
-                    for row in range(8):
-                        bits = glyph[row]
-                        for col in range(8):
-                            bx, by = cx + col, y + row
-                            if 0 <= bx < self.width and 0 <= by < self.height:
-                                if bits & (0x80 >> col):
-                                    self._surface.set_at((bx, by), color)
-                                else:
-                                    self._surface.set_at((bx, by), 0)
-                cx += 8
-            if i + 1 < len(texts):
-                cx += 8  # one-glyph-wide separator
+        self._render_pieces(x, y, texts, color)
 
     @staticmethod
     def load(path: str) -> Bitmap:
@@ -192,6 +183,7 @@ class Bitmap:
         bm.height = h
         bm.bitplanes = depth
         bm._max_colors = 1 << depth
+        bm._font_w = 8
         bm._surface = surface
         Backend.get().register_surface(surface)
         # Apply palette from loaded image

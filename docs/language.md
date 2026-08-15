@@ -346,6 +346,21 @@ bm.print_right(300, 100, "final", int_to_str(score, 6)) # right edge at x=300
 - Each glyph is 8×8 pixels, rendered directly to the bitmap (self-clearing —
   the background is filled with colour 0 before the glyph is drawn).
 
+**Fonts.** Two built-in fonts: the default 8×8 (40 columns on a 320-pixel
+screen) and a condensed 6×8 (5×7 glyphs in a 6-pixel cell, 53 columns —
+the classic Amiga "small" game font). Select per bitmap; it applies to
+every subsequent `print_at` / `print_centered` / `print_right` on that
+bitmap, including the gap between variadic pieces:
+
+```python
+bm.font(6)                       # condensed for dense panels / logs
+bm.print_at(8, 8, "AMMO", 12, "/", 24)
+bm.font(8)                       # back to the default for headings
+```
+
+Both fonts cover `space`, `!"#$%&'()*+,-./`, `0-9`, `:;<=>?@`, `A-Z`
+(lowercase is folded to uppercase).
+
 **Avoid flicker on HUD text.** `print_at` already clears each glyph cell
 before drawing, so a full `bm.clear()` on every frame is redundant — and,
 combined with a value that changes every frame, it produces visible

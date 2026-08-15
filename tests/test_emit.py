@@ -375,3 +375,11 @@ class TestStorageListExpression:
         assert 'amipython_storage_load_int_list("save", blob_items, &blob_count, 300)' in c
         assert 'amipython_storage_save_int_list("save", blob_items, blob_count);' in c
         assert c.count("blob_items, &blob_count, 300") == 2
+
+
+
+class TestBitmapFont:
+    def test_font_call_emits_runtime_setter(self):
+        c = _emit("from amiga import Bitmap\nbm = Bitmap(320, 200)\nbm.font(6)\nbm.print_at(1, 1, \"HI\")\nbm.font(8)\n")
+        assert "amipython_bitmap_font(&bm, 6);" in c
+        assert "amipython_bitmap_font(&bm, 8);" in c

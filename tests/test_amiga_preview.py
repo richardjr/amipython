@@ -694,8 +694,49 @@ def test_font_covers_printable_punctuation():
     import re
     from pathlib import Path
     c_src = (Path(__file__).resolve().parent.parent / "src/amipython/c_runtime/amipython_engine_amiga.c").read_text()
+    c_src = c_src[c_src.index("static const UBYTE s_font8x8[][8]"):]      # skip the 6x8 table
     for ch in "<>'@$%&;":
         m = re.search(r"/\* 0x%02X '.' \*/ \{([^}]*)\}" % ord(ch), c_src)
         assert m, ch
         c_bytes = [int(x, 16) for x in m.group(1).split(",")]
         assert c_bytes == _FONT_8X8[ch], ch
+
+
+
+def test_small_font_renders_and_measures_at_six_pixels():
+    from amiga._bitmap import Bitmap
+    bm = Bitmap(320, 200, bitplanes=4)
+    bm.font(6)
+    bm.print_at(10, 10, "AB", color=3)
+    # second glyph starts 6 px after the first; column 5 of a cell is clear
+    assert bm._surface.get_at_mapped((10 + 6, 10)) in (0, 3)
+    assert all(bm._surface.get_at_mapped((10 + 5, 10 + r)) == 0 for r in range(8))
+    assert bm._pieces_width(["AB", "C"]) == (2 + 1 + 1) * 6
+    bm.font(8)
+    assert bm._pieces_width(["AB", "C"]) == (2 + 1 + 1) * 8
+
+
+def test_c_font6_table_matches_python_source():
+    import re
+    from pathlib import Path
+    from amiga._font6 import FONT_6X8
+    c_src = (Path(__file__).resolve().parent.parent / "src/amipython/c_runtime/amipython_engine_amiga.c").read_text()
+    block = c_src[c_src.index("static const UBYTE s_font6x8[][8] = {") + len("static const UBYTE s_font6x8[][8] = {"):]
+    block = block[:block.index("};")]
+    rows = re.findall(r"\{([^}]*)\}", block)
+    assert len(rows) == 0x5B - 0x20
+    for code, row in zip(range(0x20, 0x5B), rows):
+        c_bytes = [int(x, 16) for x in row.split(",")]
+        assert c_bytes == FONT_6X8[chr(code)], chr(code)
+
+
+def test_bitmap_load_is_static(tmp_path):
+    """Regression: Bitmap.load must stay a @staticmethod (a refactor once ate
+    the decorator)."""
+    import pygame
+    from amiga._bitmap import Bitmap
+    surf = pygame.Surface((16, 16), depth=8)
+    surf.set_palette([(i, i, i) for i in range(256)])
+    pygame.image.save(surf, str(tmp_path / "t.png"))
+    bm = Bitmap.load(str(tmp_path / "t.png"))
+    assert bm.width == 16 and bm._font_w == 8

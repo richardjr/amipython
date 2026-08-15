@@ -256,6 +256,11 @@ void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, 
     (void)bm;
 }
 
+void amipython_bitmap_font(AmipyBitmap *bm, LONG width) {
+    bm->fontWidth = (width == 6) ? 6 : 8;
+    printf("[bitmap] font %ld\n", (long)bm->fontWidth);
+}
+
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color) {
     printf("[bitmap] print_at %ld,%ld \"%s\" color=%ld\n", x, y, text, color);
     (void)bm;

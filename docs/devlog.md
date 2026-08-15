@@ -2,6 +2,32 @@
 
 Technical notes from building amipython — problems hit, root causes found, and solutions applied. Intended as a reference for future development.
 
+## 2026-08-15: Condensed 6x8 font, and storage calls after display.show() hung the Amiga
+
+**Font.** UI-heavy games run out of room at 40 columns. Added a second built-in
+font — 5×7 glyphs in a 6×8 cell (53 columns) — selected per bitmap with
+`bm.font(6)` / `bm.font(8)`; it applies to every subsequent `print_at` /
+`print_centered` / `print_right` (including the gap between variadic pieces),
+so no print signature changed. Glyph data lives once in `src/amiga/_font6.py`;
+`scripts/gen_font6.py` writes the C table between FONT6 markers in
+`amipython_engine_amiga.c`; a test keeps them byte-identical. The C renderer
+was generalised to a cell width (`bm->fontWidth`, 0/8 = default) — the erase
+rect, the solid block, the row masks and the advance all use it. The preview
+had a second, duplicated glyph loop in `print_at` that ignored the font; it now
+shares `_render_pieces` (a refactor briefly ate `Bitmap.load`'s
+`@staticmethod` — regression test added).
+
+**Storage hang.** `storage.exists/load/save` call dos.library. Every previous
+game did that *before* `display.show()`; a title screen that probes for a
+save file *after* the display is up (i.e. after ACE's `systemUnuse()`) hung
+the emulator on a black screen — the OS is suspended, so `Open()` never
+returns. Fix in the runtime: the DOS-requester bracket that already wraps
+every storage call now also does `systemUse()` … `systemUnuse()` when the
+system is currently taken over (ACE's sanctioned way to do mid-game file
+I/O; the screen may blink for a frame). `storage.exists` also called `Close()`
+*after* the restore — reordered. So mid-game saving/loading works now; the
+2026-04-27 write-protected-floppy freeze is a separate, still-open issue.
+
 ## 2026-08-15: Phase 6 Stage 0 — multi-module, sized lists, by-ref params, --out, masked blits
 
 Driven by a much larger game than the examples (see the vault: amipython ADR

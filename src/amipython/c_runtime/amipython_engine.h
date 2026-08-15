@@ -42,6 +42,7 @@ typedef struct {
     /* Dirty rect for efficient clear — tracks bounding box of drawn area */
     WORD dirtyX1, dirtyY1, dirtyX2, dirtyY2;
     UBYTE hasDirty;
+    UBYTE fontWidth;         /* glyph cell width for print_*: 8 (default, 0) or 6 */
 } AmipyBitmap;
 
 /* ACE lifecycle — called from generated main() */
@@ -58,6 +59,7 @@ typedef struct {
 typedef struct {
     UWORD width, height;
     UBYTE bitplanes;
+    UBYTE fontWidth;         /* 8 (default) or 6 — mirrors the ACE struct */
 } AmipyBitmap;
 
 /* No-op lifecycle on non-ACE builds */
@@ -195,6 +197,9 @@ void amipython_dual_playfield_scroll_bg(AmipyDualPlayfield *dpf, LONG x, LONG y)
 void amipython_collision_register(LONG color, LONG mask);
 void amipython_collision_check(void);
 void amipython_bitmap_line(AmipyBitmap *bm, LONG x1, LONG y1, LONG x2, LONG y2, LONG color);
+/* Select the text font for subsequent print_* calls: 8 = built-in 8x8
+ * (default), 6 = condensed 6x8 (5x7 glyphs, 53 columns on a 320px screen). */
+void amipython_bitmap_font(AmipyBitmap *bm, LONG width);
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color);
 /* Multi-arg variant — prints n strings space-separated starting at (x,y). */
 void amipython_bitmap_print_at_multi(AmipyBitmap *bm, LONG x, LONG y, LONG color, LONG n, ...);
