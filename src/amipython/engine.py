@@ -208,6 +208,12 @@ OBJECT_TYPES: dict[str, EngineObjectType] = {
                 params=[EngineParam("width", AmipyType.INT)],
                 return_type=AmipyType.VOID,
             ),
+            "text_bg": EngineMethod(
+                name="text_bg",
+                c_name="amipython_bitmap_text_bg",
+                params=[EngineParam("color", AmipyType.INT)],
+                return_type=AmipyType.VOID,
+            ),
             "print_at": EngineMethod(
                 name="print_at",
                 c_name="amipython_bitmap_print_at",

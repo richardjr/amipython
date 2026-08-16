@@ -28,6 +28,7 @@ class Bitmap:
         self.bitplanes = bitplanes
         self._max_colors = 1 << bitplanes
         self._font_w = 8
+        self._text_bg = 0
         self._surface = pygame.Surface((width, height), depth=8)
         self._surface.fill(0)
         Backend.get().register_surface(self._surface)
@@ -85,6 +86,12 @@ class Bitmap:
         Mirrors `amipython_bitmap_font`."""
         self._font_w = 6 if width == 6 else 8
 
+    def text_bg(self, color: int) -> None:
+        """Background of every glyph cell drawn by print_*: a colour index, or
+        -1 for transparent (only the glyph pixels are drawn, so text can sit
+        over a texture). Mirrors `amipython_bitmap_text_bg`."""
+        self._text_bg = -1 if color < 0 else int(color)
+
     def _glyphs(self):
         return _FONT_6X8 if self._font_w == 6 else _FONT_8X8
 
@@ -92,6 +99,7 @@ class Bitmap:
         """Internal: render a sequence of text pieces at the given cursor x."""
         gw = self._font_w
         table = self._glyphs()
+        bg = self._text_bg
         for i, piece in enumerate(pieces):
             if isinstance(piece, bool):
                 text = "True" if piece else "False"
@@ -107,8 +115,8 @@ class Bitmap:
                             if 0 <= bx < self.width and 0 <= by < self.height:
                                 if bits & (0x80 >> col):
                                     self._surface.set_at((bx, by), color)
-                                else:
-                                    self._surface.set_at((bx, by), 0)
+                                elif bg >= 0:
+                                    self._surface.set_at((bx, by), bg)
                 cx += gw
             if i + 1 < len(pieces):
                 cx += gw
@@ -184,6 +192,7 @@ class Bitmap:
         bm.bitplanes = depth
         bm._max_colors = 1 << depth
         bm._font_w = 8
+        bm._text_bg = 0
         bm._surface = surface
         Backend.get().register_surface(surface)
         # Apply palette from loaded image

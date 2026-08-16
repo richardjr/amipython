@@ -187,6 +187,19 @@ bm.clear()
         assert "[bitmap] plot 10,20 color=3" in output
         assert "[bitmap] clear 320x256" in output
 
+    def test_bitmap_font_and_text_bg(self):
+        output = _compile_and_run('''
+from amiga import Bitmap
+bm = Bitmap(320, 256)
+bm.font(6)
+bm.text_bg(-1)
+bm.print_at(4, 4, "OVER TEXTURE", color=2)
+bm.text_bg(0)
+''')
+        assert "[bitmap] font 6" in output
+        assert "[bitmap] text_bg -1" in output
+        assert "[bitmap] text_bg 0" in output
+
     def test_palette_module(self):
         output = _compile_and_run('''
 from amiga import palette

@@ -69,6 +69,7 @@ The preview module currently implements the Phase 2–5B API:
 | `bm.box_filled(...)` | Supported |
 | `bm.line(...)` | Supported |
 | `bm.print_at(x, y, ...)` | Supported — variadic: accepts str/int/bool pieces, `color=` kwarg |
+| `bm.font(6|8)` / `bm.text_bg(colour|-1)` | Supported — condensed 6×8 font; opaque / inverse-video / transparent glyph cells |
 | `sin_table(n)` / `cos_table(n)` | Supported |
 | `storage.save_int_list` / `load_int_list` / `save_str` / `load_str` / `exists` | Supported — persists to `~/.amipython/<script>/<name>.dat` |
 | `sfx.load(slot, path)` / `sfx.play(slot, channel=, volume=)` / `sfx.stop(slot)` | Supported — pygame.mixer.Sound per slot; embedded in binary on transpile |

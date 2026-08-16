@@ -101,7 +101,7 @@ src/
   amiga/                          # Python preview module (pygame-ce)
     __init__.py                   # Public API exports — what `from amiga import ...` resolves to
     _backend.py                   # Pygame singleton (window, palette, events, 50fps clock, sprite/tilemap registry)
-    _bitmap.py                    # Bitmap with 8-bit indexed surface, drawing primitives, Bitmap.load(), font(6|8)
+    _bitmap.py                    # Bitmap with 8-bit indexed surface, drawing primitives, Bitmap.load(), font(6|8), text_bg(colour|-1)
     _font6.py                     # Condensed 6x8 font glyphs — source of truth for the C table (scripts/gen_font6.py)
     _display.py                   # Display — lazy window on show(), blit, sprites_behind
     _palette.py                   # OCS 12-bit palette emulation (.aga / .set / .fade)

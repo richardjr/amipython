@@ -443,6 +443,7 @@ void amipython_bitmap_init(AmipyBitmap *bm, LONG w, LONG h, LONG bp) {
     bm->bitplanes = (UBYTE)bp;
     bm->pBitmap = bitmapCreate((UWORD)w, (UWORD)h, (UBYTE)bp, BMF_CLEAR);
     bm->fontWidth = 8;
+    bm->textBg = 0;
     _dirtyReset(bm);
 }
 
@@ -1312,13 +1313,22 @@ void amipython_bitmap_font(AmipyBitmap *bm, LONG width) {
     bm->fontWidth = (width == 6) ? 6 : 8;
 }
 
+void amipython_bitmap_text_bg(AmipyBitmap *bm, LONG color) {
+    /* Background of every glyph cell drawn by print_*: a colour index, or
+     * -1 for transparent (glyph pixels only — text over a texture). */
+    bm->textBg = (color < 0) ? -1 : (WORD)color;
+}
+
 void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text, LONG color) {
     /* Render the bitmap font (8x8, or the condensed 6x8 when bm->fontWidth
-     * is 6). First clears the text area to black, then draws colored blocks
-     * for set glyph pixels. Both happen back-to-back to avoid beam racing. */
+     * is 6). Opaque mode (textBg >= 0): first clears the text area to the
+     * background colour, then draws colored blocks for set glyph pixels —
+     * back-to-back to avoid beam racing. Transparent mode (textBg < 0):
+     * only the set glyph pixels are drawn, whatever is under them stays. */
     LONG cx = x;
     LONG bw = (LONG)bm->width, bh = (LONG)bm->height;
     LONG gw = _fontWidth(bm);
+    LONG bg = (LONG)bm->textBg;
     LONG textLen = 0;
     LONG ex, ey, ew, eh;
     const char *p;
@@ -1339,9 +1349,12 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
                  (WORD)(ex + ew - 1), (WORD)(ey + eh - 1));
     /* Erase text area to black first, then immediately draw colored text.
      * Both happen back-to-back to minimise beam racing tearing. */
-    blitWait();
-    blitRect(bm->pBitmap, (UWORD)ex, (UWORD)ey, (UWORD)ew, (UWORD)eh, 0);
-    /* Draw each character — solid color block, then carve out unset pixels */
+    if (bg >= 0) {
+        blitWait();
+        blitRect(bm->pBitmap, (UWORD)ex, (UWORD)ey, (UWORD)ew, (UWORD)eh, (UBYTE)bg);
+    }
+    /* Draw each character — opaque: solid color block, then carve out unset
+     * pixels in the background colour; transparent: blit runs of set pixels */
     while (*text) {
         UBYTE ch = (UBYTE)*text;
         const UBYTE *glyph;
@@ -1353,11 +1366,34 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
             glyph = (gw == 6) ? s_font6x8[0] : s_font8x8[0];
         }
         if (cx >= 0 && cx + gw - 1 < bw && y >= 0 && y + 7 < bh) {
-            /* Draw solid color block for this character */
             UBYTE full = (UBYTE)(0xFF << (8 - gw));   /* all `gw` columns set */
+            if (bg < 0) {
+                /* Transparent: draw runs of SET pixels only */
+                for (row = 0; row < 8; row++) {
+                    UBYTE bits = glyph[row] & full;
+                    LONG by = y + row;
+                    LONG col = 0;
+                    if (bits == 0) continue;
+                    while (col < gw) {
+                        if (bits & (0x80 >> col)) {
+                            LONG start = col;
+                            while (col < gw && (bits & (0x80 >> col))) col++;
+                            blitWait();
+                            blitRect(bm->pBitmap, (UWORD)(cx + start), (UWORD)by,
+                                     (UWORD)(col - start), 1, (UBYTE)color);
+                        } else {
+                            col++;
+                        }
+                    }
+                }
+                cx += gw;
+                text++;
+                continue;
+            }
+            /* Draw solid color block for this character */
             blitWait();
             blitRect(bm->pBitmap, (UWORD)cx, (UWORD)y, (UWORD)gw, 8, (UBYTE)color);
-            /* Carve out unset pixels to black */
+            /* Carve out unset pixels in the background colour */
             for (row = 0; row < 8; row++) {
                 UBYTE bits = glyph[row] & full;
                 LONG by = y + row;
@@ -1367,7 +1403,7 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
                 } else if (bits == 0) {
                     /* All unset — clear row */
                     blitWait();
-                    blitRect(bm->pBitmap, (UWORD)cx, (UWORD)by, (UWORD)gw, 1, 0);
+                    blitRect(bm->pBitmap, (UWORD)cx, (UWORD)by, (UWORD)gw, 1, (UBYTE)bg);
                 } else {
                     /* Mixed — clear runs of unset pixels */
                     LONG col = 0;
@@ -1377,7 +1413,7 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
                             while (col < gw && !(bits & (0x80 >> col))) col++;
                             blitWait();
                             blitRect(bm->pBitmap, (UWORD)(cx + start), (UWORD)by,
-                                     (UWORD)(col - start), 1, 0);
+                                     (UWORD)(col - start), 1, (UBYTE)bg);
                         } else {
                             col++;
                         }
@@ -2836,6 +2872,12 @@ void amipython_bitmap_print_at(AmipyBitmap *bm, LONG x, LONG y, const char *text
 
 void amipython_bitmap_font(AmipyBitmap *bm, LONG width) {
     bm->fontWidth = (width == 6) ? 6 : 8;
+}
+
+void amipython_bitmap_text_bg(AmipyBitmap *bm, LONG color) {
+    /* Background of every glyph cell drawn by print_*: a colour index, or
+     * -1 for transparent (glyph pixels only — text over a texture). */
+    bm->textBg = (color < 0) ? -1 : (WORD)color;
 }
 
 #include <stdarg.h>

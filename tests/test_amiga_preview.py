@@ -716,6 +716,22 @@ def test_small_font_renders_and_measures_at_six_pixels():
     assert bm._pieces_width(["AB", "C"]) == (2 + 1 + 1) * 8
 
 
+def test_text_bg_transparent_keeps_backdrop_and_colour_fills_cells():
+    from amiga._bitmap import Bitmap
+    bm = Bitmap(64, 32, bitplanes=4)
+    bm.box_filled(0, 0, 63, 31, 5)          # a "texture" under the text
+    bm.text_bg(-1)
+    bm.print_at(8, 8, "I", color=3)         # 'I' has clear columns either side
+    px = [bm._surface.get_at_mapped((8 + c, 8 + r)) for r in range(8) for c in range(8)]
+    assert 3 in px and 5 in px and 0 not in px   # glyph drawn, backdrop kept, nothing erased
+    bm.text_bg(2)
+    bm.print_at(8, 16, " ", color=3)        # a blank cell in inverse video
+    assert all(bm._surface.get_at_mapped((8 + c, 16 + r)) == 2 for r in range(8) for c in range(8))
+    bm.text_bg(0)
+    bm.print_at(8, 8, " ", color=3)         # default opaque erases the cell again
+    assert all(bm._surface.get_at_mapped((8 + c, 8 + r)) == 0 for r in range(8) for c in range(8))
+
+
 def test_c_font6_table_matches_python_source():
     import re
     from pathlib import Path

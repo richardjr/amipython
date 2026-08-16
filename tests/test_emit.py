@@ -383,3 +383,8 @@ class TestBitmapFont:
         c = _emit("from amiga import Bitmap\nbm = Bitmap(320, 200)\nbm.font(6)\nbm.print_at(1, 1, \"HI\")\nbm.font(8)\n")
         assert "amipython_bitmap_font(&bm, 6);" in c
         assert "amipython_bitmap_font(&bm, 8);" in c
+
+    def test_text_bg_call_emits_runtime_setter(self):
+        c = _emit("from amiga import Bitmap\nbm = Bitmap(320, 200)\nbm.text_bg(-1)\nbm.print_at(1, 1, \"HI\")\nbm.text_bg(0)\n")
+        assert "amipython_bitmap_text_bg(&bm, (-1));" in c
+        assert "amipython_bitmap_text_bg(&bm, 0);" in c

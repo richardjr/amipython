@@ -361,6 +361,23 @@ bm.font(8)                       # back to the default for headings
 Both fonts cover `space`, `!"#$%&'()*+,-./`, `0-9`, `:;<=>?@`, `A-Z`
 (lowercase is folded to uppercase).
 
+**Text background.** By default every glyph cell is drawn opaque on colour 0
+(so reprinting a value erases the old one). `bm.text_bg(color)` changes the
+cell background for that bitmap's subsequent `print_*` calls: a colour index
+gives inverse-video cells (menu highlights), `-1` draws only the glyph pixels
+so text can sit over a texture or picture:
+
+```python
+bm.text_bg(-1)                   # transparent: glyphs over the backdrop
+bm.print_at(8, 8, "STATUS", color=14)
+bm.text_bg(3)                    # inverse video: cells filled with colour 3
+bm.print_at(8, 16, " YES ", color=0)
+bm.text_bg(0)                    # back to the default opaque black cells
+```
+
+Transparent text does not erase what was printed before — clear the area
+(`clear_rect`, `box_filled`, or re-blit the backdrop) before reprinting.
+
 **Avoid flicker on HUD text.** `print_at` already clears each glyph cell
 before drawing, so a full `bm.clear()` on every frame is redundant — and,
 combined with a value that changes every frame, it produces visible
